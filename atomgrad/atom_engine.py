@@ -24,7 +24,7 @@ class Atom:
 
         # If same number of dimension 
         if self.check_dim(self.data) == self.check_dim(other):
-            assert self.data.shape == other.shape, f'Two 2d tensors have to be same shape.'
+            assert self.data.shape == other.shape, 'Two 2d tensors have to be same shape.'
 
         out = Atom(self.data + other.data, (self, other))
         def _backward():
@@ -32,7 +32,26 @@ class Atom:
             other.grad += out.grad
 
         out._backward = _backward
+
         return out
+    
+    def __mul__(self, other):
+        other = other if isinstance(other, Atom) else Atom(other)
+
+        # If same number of dimension 
+        if self.check_dim(self.data) == self.check_dim(other):
+            assert self.data.shape == other.shape, 'Two 2d tensors have to be same shape.'
+
+        out = Atom(self.data * self.data, (self, other))
+
+        def _backward():
+            self.grad += other.data * out.grad
+            other.grad += self.data * out.grad
+        out._backward = _backward
+
+        return out
+
+
 
     def __repr__(self):
         return f'atom.tensor(data={self.data}, grad={self.grad})'
