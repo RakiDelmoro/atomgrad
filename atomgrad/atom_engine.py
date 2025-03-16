@@ -4,6 +4,7 @@ class Atom:
     """ atomgrad tensor built at a top of numpy array
         atomgrad tensor make numpy array for automatic gradient calculation
     """
+
     def __init__(self, data, _parents=()):
         self.data = np.array(data, dtype=np.float32)
 
@@ -34,7 +35,7 @@ class Atom:
         out._backward = _backward
 
         return out
-    
+
     def __mul__(self, other):
         other = other if isinstance(other, Atom) else Atom(other)
 
@@ -42,7 +43,7 @@ class Atom:
         if self.check_dim(self.data) == self.check_dim(other):
             assert self.data.shape == other.shape, 'Two 2d tensors have to be same shape.'
 
-        out = Atom(self.data * self.data, (self, other))
+        out = Atom(self.data * other.data, (self, other))
 
         def _backward():
             self.grad += other.data * out.grad
@@ -50,8 +51,24 @@ class Atom:
         out._backward = _backward
 
         return out
+    
+    def __sub__(self, other):
+        other = other if isinstance(other, Atom) else Atom(other)
+        if self.check_dim(self.data) == self.check_dim(other):
+            assert self.data.shape == other.shape, 'Two 2d tensors have to be same shape.'
 
+        out = Atom(self.data - other.data, (self, other))
 
+        return out
+
+    def __rsub__(self, other):
+        return self + (-other)
+    
+    def __rmul__(self, other):
+        return self * other
+    
+    def __radd__(self, other):
+        return self + other
 
     def __repr__(self):
         return f'atom.tensor(data={self.data}, grad={self.grad})'
