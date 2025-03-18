@@ -1,11 +1,29 @@
+import atom
 import torch
-import numpy as np
-from tensor import Atom
 
-x = Atom.tensor(np.random.randn(2, 3))
-# output size - input_size
-y = Atom.tensor(np.random.randn(1, 3))
+def test_sanity():
+    x = atom.Tensor(-4.0, requires_grad=True)
+    z = 2 * x + 2 + x
+    q = z.relu() + z * x
+    h = (z * z).relu()
+    y = h + q + q * x
+    y.backward()
+    xmg, ymg = x, y
 
-z = x + 0.1
-print(x.data)
-print(z.data)
+    x = torch.tensor([-4.0], dtype=torch.double, requires_grad=True)
+    z = 2 * x + 2 + x
+    q = z.relu() + z * x
+    h = (z * z).relu()
+    y = h + q + q * x
+    y.backward()
+    xpt, ypt = x, y
+
+    # forward pass satisfy
+    assert ymg.data == ypt.data.item()
+    # backward pass satisfy
+    assert xmg.grad.data == xpt.grad.item()
+
+    print(ymg.data, ypt.data.item())
+    print(xmg.grad.data, xpt.grad.item())
+
+test_sanity()
