@@ -50,6 +50,9 @@ class Tensor:
             backward_grad = dependency.grad_function(grad.data)
             dependency.tensor.backward(Tensor(backward_grad))
 
+    def relu(self):
+        return relu(self)
+
     def __sub__(self, other) -> 'Tensor':
         return sub(self, ensure_is_tensor(other))
 
@@ -167,3 +170,15 @@ def matmul(data1: Tensor, data2: Tensor):
         depends_on.append(Dependencies(data2, grad_fn2))
 
     return Tensor(out, requires_grad, depends_on)
+
+def relu(data: Tensor):
+    relu_activated = np.maximum(0, data.data)
+
+    depends_on: List[Dependencies] = []
+
+    if data.requires_grad:
+        def grad_fn(grad: np.ndarray):
+            return np.where(relu_activated > 0, 1, 0) * grad
+        depends_on.append(Dependencies(data, grad_fn))
+
+    return Tensor(relu_activated, data.requires_grad, depends_on)
