@@ -11,7 +11,6 @@ def tensor(data, requires_grad=False):
         'depends_on': []
         }
 
-
 '''TENSOR OPS'''
 def add(x1, x2):
     if type(x1) != dict: x1 = tensor(x1)
@@ -28,12 +27,6 @@ def add(x1, x2):
     result['grad_fn'] = grad_fn
 
     return result
-
-def div():
-    pass
-
-def pow():
-    pass
 
 def relu(x):
     if type(x) != dict:
@@ -115,3 +108,9 @@ def backward(atom_tensor, grad=None):
     for node in reversed(topo):
         if node['grad_fn'] is not None:
             node['grad_fn'](node['grad'])
+
+def div():
+    pass
+
+def pow():
+    pass
