@@ -1,184 +1,117 @@
 import numpy as np
-from typing import List, Optional, Union, Callable, NamedTuple
 
-class Dependencies(NamedTuple):
-    tensor: 'Tensor'
-    grad_function: Callable[[np.ndarray], np.ndarray]
+def tensor(data, requires_grad=False):
+    """Create a tensor with data and gradient tracking."""
+    return {
+        'data': np.array(data, dtype=np.float32),
+        'shape': np.array(data).shape,
+        'grad': np.zeros_like(data) if requires_grad else None,
+        'requires_grad': requires_grad,
+        'grad_fn': None,
+        'depends_on': []
+        }
 
-Arrayable = Union[float, list, np.ndarray]
-Tensorable = Union['Tensor', float, np.ndarray]
 
-def ensure_is_array(data: Arrayable):
-    if isinstance(data, np.ndarray):
-        return data
+'''TENSOR OPS'''
+def add(x1, x2):
+    if type(x1) != dict: x1 = tensor(x1)
+    if type(x2) != dict: x2 = tensor(x2)
+
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+
+    result = tensor(x1['data'] + x2['data'], requires_grad)
+    result['depends_on'] = [x1, x2]
+    
+    def grad_fn(grad):
+        if x1['requires_grad']: x1['grad'] += grad
+        if x2['requires_grad']: x2['grad'] += np.sum(grad, axis=0)
+    result['grad_fn'] = grad_fn
+
+    return result
+
+def div():
+    pass
+
+def pow():
+    pass
+
+def relu(x):
+    if type(x) != dict:
+        x = tensor(x)
+
+    requires_grad = x['requires_grad']
+
+    result = tensor(np.maximum(0, x['data']), requires_grad)
+    result['depends_on'] = [x]
+
+    def grad_fn(grad):
+        if requires_grad:
+            x['grad'] = np.where(result > 0, 1, 0) * grad
+    result['grad_fn'] = grad_fn
+
+    return result
+
+def sub(x1, x2):
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+
+    return tensor(x1['data'] - x2['data'], requires_grad)
+
+def mul(x1, x2):
+    if type(x1) != dict: x1 = tensor(x1)
+    if type(x2) != dict: x2 = tensor(x2)
+
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+
+    result = tensor(x1['data'] * x2['data'], requires_grad)
+    result['depends_on'] = [x1, x2]
+    
+    def grad_fn(grad):
+        """Backward function for multiplication."""
+        if x1['requires_grad']: x1['grad'] += grad * x2['data']
+        if x2['requires_grad']: x2['grad'] += grad * x1['data']
+    result['grad_fn'] = grad_fn
+
+    return result
+
+def matmul(x1, x2):
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+
+    result = tensor(np.matmul(x1['data'], x2['data'].T), requires_grad)
+    result['depends_on'] = [x1, x2]
+
+    def grad_fn(grad):
+        if x1['requires_grad']: x1['grad'] += grad @ x2['data']
+        if x2['requires_grad']: x2['grad'] += grad.T @ x1['data']
+    result['grad_fn'] = grad_fn
+
+    return result
+
+def build_topo(node):
+    """Build topological order starting from the given node."""
+    visited = set()
+    topo = []
+    
+    def visit(node):
+        node_identity = id(node)
+        if node_identity not in visited:
+            visited.add(node_identity)
+            for depends_on in node['depends_on']:
+                visit(depends_on)
+            topo.append(node)
+    visit(node)
+    return topo
+
+def backward(atom_tensor, grad=None):
+    """Compute gradients via reverse-mode autodiff."""
+    if not atom_tensor['requires_grad']:
+        return
+    
+    topo = build_topo(atom_tensor)
+    if grad is None:
+        atom_tensor['grad'] = np.ones_like(atom_tensor['data'])
     else:
-        return np.array(data)
+        atom_tensor['grad'] = grad
     
-def ensure_is_tensor(data: Tensorable):
-    if isinstance(data, Tensor):
-        return data
-    else:
-        return Tensor(data)
-
-class Tensor:
-    def __init__(self, data: Arrayable, requires_grad: bool=False, depends_on: List[Dependencies]=None):
-        self.data = ensure_is_array(data)
-        self.requires_grad = requires_grad
-        self.depends_on = depends_on or []
-        self.shape = self.data.shape
-        self.grad: Optional['Tensor'] = None
-
-        if self.requires_grad: self.zero_grad()
-
-    def zero_grad(self):
-        self.grad = Tensor(np.zeros_like(self.data, dtype=np.float32))
-
-    def __repr__(self):
-        return f'atom.tensor(data={self.data}, requires_grad={self.requires_grad})'
-
-    def backward(self, grad: 'Tensor' = None) -> None:
-        assert self.requires_grad, "called backward on non-requires-grad tensor"
-
-        if grad is None:
-            if self.shape == (): grad = Tensor(1.0)
-            else: raise RuntimeError("grad must be specified for non-0-tensor")
-
-        # Accumulate gradients
-        self.grad.data = self.grad.data + grad.data
-
-        for dependency in self.depends_on:
-            backward_grad = dependency.grad_function(grad.data)
-            dependency.tensor.backward(Tensor(backward_grad))
-
-    def relu(self):
-        return relu(self)
-
-    def __sub__(self, other) -> 'Tensor':
-        return sub(self, ensure_is_tensor(other))
-
-    def __rsub__(self, other) -> 'Tensor':
-        return sub(ensure_is_tensor(other), self)
-
-    def __matmul__(self, other) -> 'Tensor':
-        return matmul(self, ensure_is_tensor(other))
-    
-    def __rmatmul__(self, other) -> 'Tensor':
-        return matmul(ensure_is_tensor(other), self)
-
-    def __mul__(self, other) -> 'Tensor':
-        return mul(self, ensure_is_tensor(other))
-    
-    def __rmul__(self, other) -> 'Tensor':
-        return mul(ensure_is_tensor(other), self)
-
-    def __add__(self, other) -> 'Tensor':
-        return add(self, ensure_is_tensor(other))
-
-    def __radd__(self, other) -> 'Tensor':
-        return add(ensure_is_tensor(other), self)    
-
-'''Tensor Opsss'''
-
-def sub(data1: Tensor, data2: Tensor) -> Tensor:
-    return data1 + -data2
-
-def mul(data1: Tensor, data2: Tensor):
-    out = data1.data * data2.data
-    requires_grad = data1.requires_grad or data2.requires_grad
-
-    depends_on: List[Dependencies] = []
-
-    if data1.requires_grad:
-        def grad_fn1(grad: np.ndarray):
-            grad = grad * data2.data
-            ndims_added = grad.ndim - data1.data.ndim
-            # Sum out added dims
-            for _ in range(ndims_added):
-                grad = grad.sum(axis=0)
-            # Sum across broadcasted (but non-added dims)
-            for i , dim in enumerate(data2.shape):
-                if dim == 1:
-                    grad = grad.sum(axis=i, keepdims=True)
-            return grad
-        depends_on.append(Dependencies(data1, grad_fn1))
-
-    if data2.requires_grad:
-        def grad_fn2(grad: np.ndarray):
-            grad = grad * data1.data
-            # Sum out added dims
-            ndims_added = grad.ndim - data2.data.ndim
-            for _ in range(ndims_added):
-                grad = grad.sum(axis=0)
-            # Sum across broadcasted (but non-added dims)
-            for i, dim in enumerate(data2.shape):
-                if dim == 1:
-                    grad = grad.sum(axis=i, keepdims=True)
-            return grad
-        depends_on.append(Dependencies(data2, grad_fn2))
-
-    return Tensor(out, requires_grad, depends_on)
-
-def add(data1: Tensor, data2: Tensor):
-    out = data1.data + data2.data
-
-    requires_grad = data1.requires_grad or data2.requires_grad
-    depends_on: List[Dependencies] = []
-
-    if data1.requires_grad:
-        def grad_fn1(grad: np.ndarray):
-             # Sum out added dims
-            ndims_added = grad.ndim - data1.data.ndim
-            for _ in range(ndims_added):
-                grad = grad.sum(axis=0)
-            for i, dim in enumerate(data1.shape):
-                if dim == 1:
-                    grad = grad.sum(axis=i, keepdims=True)
-            return grad
-        depends_on.append(Dependencies(data1, grad_fn1))
-
-    if data2.requires_grad:
-        def grad_fn2(grad: np.ndarray) -> np.ndarray:
-            # Sum out added dims
-            ndims_added = grad.ndim - data2.data.ndim
-            for _ in range(ndims_added):
-                grad = grad.sum(axis=0)
-            # Sum across broadcasted (but non-added dims)
-            for i, dim in enumerate(data2.shape):
-                if dim == 1:
-                    grad = grad.sum(axis=i, keepdims=True)
-            return grad
-        depends_on.append(Dependencies(data2, grad_fn2))
-
-    return Tensor(out, requires_grad, depends_on)
-
-def matmul(data1: Tensor, data2: Tensor):
-    out = np.matmul(data1.data, data2.data.T)
-    # If 3d shape don't need to transpose the other data
-    if data1.data.ndim == 3 and data2.data.ndim == 3: out = np.matmul(data1.data, data2.data)
-
-    requires_grad = data1.requires_grad or data2.requires_grad
-    depends_on: List[Dependencies] = []
-
-    if data1.requires_grad:
-        def grad_fn1(grad: np.ndarray):
-            return grad @ data2.data.swapaxes(-1, -2) 
-        depends_on.append(Dependencies(data1, grad_fn1))
-
-    if data2.requires_grad:
-        def grad_fn2(grad: np.ndarray):
-            return data1.data.swapaxes(-1, -2) @ grad
-        depends_on.append(Dependencies(data2, grad_fn2))
-
-    return Tensor(out, requires_grad, depends_on)
-
-def relu(data: Tensor):
-    relu_activated = np.maximum(0, data.data)
-
-    depends_on: List[Dependencies] = []
-
-    if data.requires_grad:
-        def grad_fn(grad: np.ndarray):
-            return np.where(relu_activated > 0, 1, 0) * grad
-        depends_on.append(Dependencies(data, grad_fn))
-
-    return Tensor(relu_activated, data.requires_grad, depends_on)
+    for node in reversed(topo):
+        if node['grad_fn'] is not None:
+            node['grad_fn'](node['grad'])
