@@ -46,7 +46,7 @@ def relu(x):
 
     def grad_fn(grad):
         if requires_grad:
-            x['grad'] = np.where(result > 0, 1, 0) * grad
+            x['grad'] = np.where(result['data'] > 0, 1, 0) * grad
     result['grad_fn'] = grad_fn
 
     return result
