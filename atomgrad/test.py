@@ -12,7 +12,7 @@ def nn_forward_test():
     gen_w_2 = np.random.randn(3, 5)
     gen_b_2 = np.random.randn(3)
 
-    # ATOM in action!
+    '''ATOM in action'''
     atom_x = atom.tensor(gen_x, requires_grad=True)
     atom_y = atom.tensor(gen_y, requires_grad=True)
     # First weight and bias parameters
@@ -28,7 +28,7 @@ def nn_forward_test():
     grad = (atom_out['data'] - atom_y['data']) / atom_y['data'].shape[-1] # MSELoss
     atom.backward(atom_out, grad)
 
-    # TORCH in action!
+    '''TORCH in action'''
     torch_x = torch.tensor(gen_x, requires_grad=True, dtype=torch.float32)
     torch_y = torch.tensor(gen_y, requires_grad=True, dtype=torch.float32)
     # First weight and bias parameters
@@ -56,4 +56,41 @@ def nn_forward_test():
     print(atom_w_2['grad'])
     print(torch_w_2.grad)
 
-nn_forward_test()
+def test_with_3d_shape():
+    gen_a = np.random.randn(2, 10)
+    gen_b = np.random.randn(10)
+    gen_w = np.random.randn(2, 10, 10)
+    gen_y = np.random.randn(2, 10)
+
+    # ATOM in action
+    atom_a = atom.tensor(gen_a, requires_grad=True)
+    atom_b = atom.tensor(gen_b, requires_grad=True)
+    atom_w = atom.tensor(gen_w, requires_grad=True)
+    atom_y = atom.tensor(gen_y, requires_grad=True)
+
+    a_x = atom.add(atom_a, atom_b)    
+    a_result = atom.matmul_3d(atom_w, a_x)
+    grad = (a_result['data'] - atom_y['data']) / atom_y['data'].shape[-1]
+    a_loss = np.mean((a_result['data'] - atom_y['data'])**2)
+    atom.backward(a_result, grad)
+
+    # TORCH in action
+    torch_a = torch.tensor(gen_a, requires_grad=True, dtype=torch.float32)
+    torch_b = torch.tensor(gen_b, requires_grad=True, dtype=torch.float32)
+    torch_w = torch.tensor(gen_w, requires_grad=True, dtype=torch.float32)
+    torch_y = torch.tensor(gen_y, requires_grad=True, dtype=torch.float32)
+
+    t_x = torch_a + torch_b
+    t_result = torch.matmul(torch_w, t_x.unsqueeze(-1)).squeeze(-1)
+    t_loss = torch.nn.MSELoss().forward(t_result, torch_y)
+    t_result.retain_grad()
+    t_loss.backward()
+
+    # Scalar loss satisfaction
+    print(a_loss, t_loss)
+    # Activation satisfaction
+    print(a_result)
+    print(t_result)
+
+test_with_3d_shape()
+# nn_forward_test()
