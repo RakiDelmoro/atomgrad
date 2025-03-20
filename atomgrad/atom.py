@@ -31,10 +31,8 @@ def add(x1, x2):
 
     return result
 
-def relu(x):
+def relu(x, requires_grad=False):
     if isinstance(x, np.ndarray): x = tensor(x)
-
-    requires_grad = x['requires_grad']
 
     result = tensor(np.maximum(0, x['data']), requires_grad)
     result['depends_on'] = [x]
@@ -69,6 +67,9 @@ def mul(x1, x2):
     return result
 
 def matmul(x1, x2):
+    if isinstance(x1, np.ndarray): x1 = tensor(x1)
+    if isinstance(x2, np.ndarray): x2 = tensor(x2)
+
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
     result = tensor(np.matmul(x1['data'], x2['data'].T), requires_grad)
@@ -151,6 +152,18 @@ def matmul_3d(x1, x2):
                 else:
                     for i in range(x2_shape[0]): x2['grad'][i] += x1_data[i].T @ grad[i]
 
+    result['grad_fn'] = grad_fn
+    return result
+
+def sum_tensor(list_tensor):
+    result = tensor(sum([t['data'] for t in list_tensor]), requires_grad=True)
+    result['depennds_on'] = [t for t in list_tensor]
+
+    def grad_fn(grad):
+        for t in list_tensor:
+            if t['data'].ndim == grad.ndim: t['grad'] += grad
+            else: t['grad'] += np.sum(grad, axis=0)
+        
     result['grad_fn'] = grad_fn
     return result
 
