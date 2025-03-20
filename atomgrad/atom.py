@@ -8,13 +8,12 @@ def tensor(data, requires_grad=False):
         'grad': np.zeros_like(data) if requires_grad else None,
         'requires_grad': requires_grad,
         'grad_fn': None,
-        'depends_on': []
-        }
+        'depends_on': []}
 
 '''TENSOR OPS'''
 def add(x1, x2):
-    if type(x1) != dict: x1 = tensor(x1)
-    if type(x2) != dict: x2 = tensor(x2)
+    if isinstance(x1, np.ndarray): x1 = tensor(x1)
+    if isinstance(x2, np.ndarray): x2 = tensor(x2)
 
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
@@ -22,15 +21,18 @@ def add(x1, x2):
     result['depends_on'] = [x1, x2]
     
     def grad_fn(grad):
-        if x1['requires_grad']: x1['grad'] += grad
-        if x2['requires_grad']: x2['grad'] += np.sum(grad, axis=0)
+        if x1['requires_grad']:
+            if x1['grad'].ndim == grad.ndim: x1['grad'] += grad
+            else: x1['grad'] += np.sum(grad, axis=0)
+        if x2['requires_grad']:
+            if x2['grad'].ndim == grad.ndim: x2['grad'] += grad
+            else: x2['grad'] += np.sum(grad, axis=0)
     result['grad_fn'] = grad_fn
 
     return result
 
 def relu(x):
-    if type(x) != dict:
-        x = tensor(x)
+    if isinstance(x, np.ndarray): x = tensor(x)
 
     requires_grad = x['requires_grad']
 
@@ -50,8 +52,8 @@ def sub(x1, x2):
     return tensor(x1['data'] - x2['data'], requires_grad)
 
 def mul(x1, x2):
-    if type(x1) != dict: x1 = tensor(x1)
-    if type(x2) != dict: x2 = tensor(x2)
+    if isinstance(x1, np.ndarray): x1 = tensor(x1)
+    if isinstance(x2, np.ndarray): x2 = tensor(x2)
 
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
@@ -79,7 +81,80 @@ def matmul(x1, x2):
 
     return result
 
-def build_topo(node):
+def matmul_3d(x1, x2):
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+    
+    x1_data = x1['data']
+    x2_data = x2['data']
+    
+    x1_shape = x1_data.shape
+    x2_shape = x2_data.shape
+    
+    # Check dimensions
+    is_x1_3d = len(x1_shape) == 3
+    is_x2_3d = len(x2_shape) == 3
+    
+    # x1 @ x2 (2d shape size)
+    if not is_x1_3d and not is_x2_3d:
+        result_data = np.matmul(x1_data, x2_data.T)
+
+    # x1(3d shape size) @ x2(2d shape size) 
+    elif is_x1_3d and not is_x2_3d:
+        if len(x2_shape) == 1: result_data = np.matmul(x1_data, x2_data)
+        elif x2_shape[0] == x1_shape[0]:
+            result_data = np.zeros((x1_shape[0], x1_shape[1]))
+            for i in range(x1_shape[0]): result_data[i] = np.matmul(x1_data[i], x2_data[i])
+        else:
+            result_data = np.zeros((x1_shape[0], x1_shape[1], x2_shape[0]))
+            for i in range(x1_shape[0]): result_data[i] = np.matmul(x1_data[i], x2_data.T)
+
+    # x1(2d shape size) @ x2(3d shape size)
+    elif not is_x1_3d and is_x2_3d:
+        if len(x1_shape) == 1:
+            result_data = np.zeros((x2_shape[0], x2_shape[2]))
+            for i in range(x2_shape[0]): result_data[i] = np.matmul(x1_data, x2_data[i])
+        elif x1_shape[0] == x2_shape[0]:
+            result_data = np.zeros((x2_shape[0], x2_shape[2]))
+            for i in range(x2_shape[0]): result_data[i] = np.matmul(x1_data[i], x2_data[i])
+        else:
+            result_data = np.zeros((x2_shape[0], x1_shape[0], x2_shape[2]))
+            for i in range(x2_shape[0]): result_data[i] = np.matmul(x1_data, x2_data[i])
+    
+    # x1 @ x2 (3d shape size)
+    else:
+        # Both 3D case - batch dimensions should match
+        if x1_shape[0] != x2_shape[0]:
+            raise ValueError("Batch dimensions must match for 3D-3D matmul")
+        
+        # Case: (batch, m, n) @ (batch, n, p) -> (batch, m, p)
+        result_data = np.zeros((x1_shape[0], x1_shape[1], x2_shape[2]))
+        for i in range(x1_shape[0]):
+            result_data[i] = np.matmul(x1_data[i], x2_data[i])
+    
+    result = tensor(result_data, requires_grad)
+    result['depends_on'] = [x1, x2]
+    
+    def grad_fn(grad):
+        if is_x1_3d and not is_x2_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
+            if x1['requires_grad']:
+                for i in range(x1_shape[0]): x1['grad'][i] += np.outer(grad[i], x2_data[i])
+            if x2['requires_grad']:
+                for i in range(x2_shape[0]): x2['grad'][i] += np.matmul(grad[i], x1_data[i])
+        else:
+            if x1['requires_grad']: 
+                if not is_x1_3d: x1['grad'] += grad @ x2_data
+                else:
+                    for i in range(x1_shape[0]): x1['grad'][i] += grad[i][:, np.newaxis] @ x2_data[i][np.newaxis, :]
+            
+            if x2['requires_grad']:
+                if not is_x2_3d: x2['grad'] += grad.T @ x1_data
+                else:
+                    for i in range(x2_shape[0]): x2['grad'][i] += x1_data[i].T @ grad[i]
+
+    result['grad_fn'] = grad_fn
+    return result
+
+def build_topo(nodes):
     """Build topological order starting from the given node."""
     visited = set()
     topo = []
@@ -91,11 +166,12 @@ def build_topo(node):
             for depends_on in node['depends_on']:
                 visit(depends_on)
             topo.append(node)
-    visit(node)
+    visit(nodes)
     return topo
 
 def backward(atom_tensor, grad=None):
     """Compute gradients via reverse-mode autodiff."""
+
     if not atom_tensor['requires_grad']:
         return
     
@@ -108,9 +184,3 @@ def backward(atom_tensor, grad=None):
     for node in reversed(topo):
         if node['grad_fn'] is not None:
             node['grad_fn'](node['grad'])
-
-def div():
-    pass
-
-def pow():
-    pass
