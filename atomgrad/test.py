@@ -68,7 +68,7 @@ def test_with_3d_shape():
     atom_w = atom.tensor(gen_w, requires_grad=True)
     atom_y = atom.tensor(gen_y, requires_grad=True)
 
-    a_x = atom.add(atom_a, atom_b)    
+    a_x = atom.sum_tensor([atom_a, atom_b])    
     a_result = atom.matmul_3d(atom_w, a_x)
     grad = (a_result['data'] - atom_y['data']) / atom_y['data'].shape[-1]
     a_loss = np.mean((a_result['data'] - atom_y['data'])**2)
@@ -80,9 +80,10 @@ def test_with_3d_shape():
     torch_w = torch.tensor(gen_w, requires_grad=True, dtype=torch.float32)
     torch_y = torch.tensor(gen_y, requires_grad=True, dtype=torch.float32)
 
-    t_x = torch_a + torch_b
+    t_x = sum([torch_a, torch_b])
     t_result = torch.matmul(torch_w, t_x.unsqueeze(-1)).squeeze(-1)
     t_loss = torch.nn.MSELoss().forward(t_result, torch_y)
+    t_x.retain_grad()
     t_result.retain_grad()
     t_loss.backward()
 
@@ -92,5 +93,37 @@ def test_with_3d_shape():
     print(a_result)
     print(t_result)
 
-test_with_3d_shape()
+def classifier_test():
+    gen_x = np.random.randn(2, 10)
+    gen_w = np.random.randn(5, 10)
+    gen_b = np.random.randn(5)
+    gen_y = np.zeros((2, 5))
+    gen_y[np.arange(len(gen_x)), [np.random.randint(0, 2) for _ in range(len(gen_x))]] = 1
+
+    '''ATOM'''
+    atom_x = atom.relu(gen_x, requires_grad=True)
+    atom_w = atom.tensor(gen_w, requires_grad=True)
+    atom_b = atom.tensor(gen_b, requires_grad=True)
+    atom_y = atom.tensor(gen_y)
+    # forward pass
+    a_act = atom.add(atom.matmul(atom_x, atom_w), atom_b)
+    a_grad = (atom.softmax(a_act) - gen_y)
+    atom.backward(a_act, a_grad)
+
+    '''TORCH'''
+    torch_x = torch.tensor(gen_x, requires_grad=True, dtype=torch.float32).relu()
+    torch_w = torch.tensor(gen_w, requires_grad=True, dtype=torch.float32)
+    torch_b = torch.tensor(gen_b, requires_grad=True, dtype=torch.float32)
+    torch_y = torch.tensor(gen_y, requires_grad=True, dtype=torch.float32)
+    # forward pass
+    t_act = torch.matmul(torch_x, torch_w.T) + torch_b
+    loss = torch.nn.CrossEntropyLoss().forward(t_act, torch_y)
+    torch_x.retain_grad()
+    t_act.retain_grad()
+    loss.backward()
+
+    print()
+
+classifier_test()
+# test_with_3d_shape()
 # nn_forward_test()
