@@ -27,6 +27,7 @@ def add(x1, x2):
         if x2['requires_grad']:
             if x2['grad'].ndim == grad.ndim: x2['grad'] += grad
             else: x2['grad'] += np.sum(grad, axis=0)
+
     result['grad_fn'] = grad_fn
 
     return result
@@ -39,14 +40,14 @@ def relu(x, requires_grad=False):
 
     def grad_fn(grad):
         if requires_grad:
-            x['grad'] = np.where(result['data'] > 0, 1, 0) * grad
+            x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
     result['grad_fn'] = grad_fn
 
     return result
 
 def softmax(x):
     # Subtract max value for numerical stability
-    shifted_data = x- np.max(x, axis=-1, keepdims=True)
+    shifted_data = x['data']- np.max(x['data'], axis=-1, keepdims=True)
     # Calculate exp
     exp_data = np.exp(shifted_data)
     # Sum along axis=1 and keep dimensions for broadcasting
@@ -86,8 +87,8 @@ def matmul(x1, x2):
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
-        if x1['requires_grad']: x1['grad'] += grad @ x2['data']
-        if x2['requires_grad']: x2['grad'] += grad.T @ x1['data']
+        if x1['requires_grad']: x1['grad'] += (grad @ x2['data'])
+        if x2['requires_grad']: x2['grad'] += (grad.T @ x1['data']) 
     result['grad_fn'] = grad_fn
 
     return result
@@ -100,7 +101,7 @@ def matmul_3d(x1, x2):
     
     x1_shape = x1_data.shape
     x2_shape = x2_data.shape
-    
+
     # Check dimensions
     is_x1_3d = len(x1_shape) == 3
     is_x2_3d = len(x2_shape) == 3
@@ -207,3 +208,7 @@ def backward(atom_tensor, grad=None):
     for node in reversed(topo):
         if node['grad_fn'] is not None:
             node['grad_fn'](node['grad'])
+
+def update(parameters: dict):
+    for _, params in parameters.items():
+        print(params)
