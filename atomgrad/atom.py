@@ -71,8 +71,11 @@ def mul(x1, x2):
     
     def grad_fn(grad):
         """Backward function for multiplication."""
-        if x1['requires_grad']: x1['grad'] += grad * x2['data']
-        if x2['requires_grad']: x2['grad'] += grad * x1['data']
+        if x1['requires_grad']:
+            x1['grad'] += grad * x2['data']
+        if x2['requires_grad']:
+            # It is np.sum if the different shape with x2['grad'] ???
+            x2['grad'] += np.sum(grad * x1['data'], axis=0)
     result['grad_fn'] = grad_fn
 
     return result
@@ -168,7 +171,8 @@ def matmul_3d(x1, x2):
 
 def sum_tensor(list_tensor):
     result = tensor(sum([t['data'] for t in list_tensor]), requires_grad=True)
-    result['depennds_on'] = [t for t in list_tensor]
+    #??? depennds_on instead of depends_on
+    result['depends_on'] = [t for t in list_tensor]
 
     def grad_fn(grad):
         for t in list_tensor:
