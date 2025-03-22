@@ -22,9 +22,11 @@ def add(x1, x2):
     
     def grad_fn(grad):
         if x1['requires_grad']:
+            x1['grad'] = np.zeros_like(x1['data'])
             if x1['grad'].ndim == grad.ndim: x1['grad'] += grad
             else: x1['grad'] += np.sum(grad, axis=0)
         if x2['requires_grad']:
+            x2['grad'] = np.zeros_like(x2['data'])
             if x2['grad'].ndim == grad.ndim: x2['grad'] += grad
             else: x2['grad'] += np.sum(grad, axis=0)
 
@@ -40,6 +42,7 @@ def relu(x, requires_grad=False):
 
     def grad_fn(grad):
         if requires_grad:
+            x['grad'] = np.zeros_like(x['data'])
             x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
     result['grad_fn'] = grad_fn
 
@@ -60,20 +63,25 @@ def sub(x1, x2):
 
     return tensor(x1['data'] - x2['data'], requires_grad)
 
-def mul(x1, x2):
+def mul(x1, x2, weights, vk_params):
     if isinstance(x1, np.ndarray): x1 = tensor(x1)
     if isinstance(x2, np.ndarray): x2 = tensor(x2)
 
     requires_grad = x1['requires_grad'] or x2['requires_grad']
-
     result = tensor(x1['data'] * x2['data'], requires_grad)
     result['depends_on'] = [x1, x2]
-    
+
     def grad_fn(grad):
         """Backward function for multiplication."""
         if x1['requires_grad']:
-            x1['grad'] += grad * x2['data']
+            x1['grad'] = np.zeros((x1['data'].shape[0], len(vk_params)))
+            for i in range(len(vk_params)):
+                x1['grad'][:, i] += np.sum(np.sum(grad * vk_params[i]['data'], axis=-1), axis=-1)
+
+            weights['grad'] = x1['grad']
+
         if x2['requires_grad']:
+            x2['grad'] = np.zeros_like(x2['data'])
             # It is np.sum if the different shape with x2['grad'] ???
             x2['grad'] += np.sum(grad * x1['data'], axis=0)
     result['grad_fn'] = grad_fn
@@ -90,8 +98,14 @@ def matmul(x1, x2):
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
-        if x1['requires_grad']: x1['grad'] += (grad @ x2['data'])
-        if x2['requires_grad']: x2['grad'] += (grad.T @ x1['data']) 
+        # Zero grad
+        x1['grad'] = np.zeros_like(x1['data'])
+        x2['grad'] = np.zeros_like(x2['data'])
+
+        if x1['requires_grad']:
+            x1['grad'] += (grad @ x2['data'])
+        if x2['requires_grad']:
+            x2['grad'] += (grad.T @ x1['data']) 
     result['grad_fn'] = grad_fn
 
     return result
@@ -150,6 +164,10 @@ def matmul_3d(x1, x2):
     result['depends_on'] = [x1, x2]
     
     def grad_fn(grad):
+        # Zero grad
+        x1['grad'] = np.zeros_like(x1['data'])
+        x2['grad'] = np.zeros_like(x1['data'])
+
         if is_x1_3d and not is_x2_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
             if x1['requires_grad']:
                 for i in range(x1_shape[0]): x1['grad'][i] += np.outer(grad[i], x2_data[i])
@@ -160,7 +178,6 @@ def matmul_3d(x1, x2):
                 if not is_x1_3d: x1['grad'] += grad @ x2_data
                 else:
                     for i in range(x1_shape[0]): x1['grad'][i] += grad[i][:, np.newaxis] @ x2_data[i][np.newaxis, :]
-            
             if x2['requires_grad']:
                 if not is_x2_3d: x2['grad'] += grad.T @ x1_data
                 else:
@@ -176,6 +193,7 @@ def sum_tensor(list_tensor):
 
     def grad_fn(grad):
         for t in list_tensor:
+            t['grad'] = np.zeros_like(t['data'])
             if t['data'].ndim == grad.ndim: t['grad'] += grad
             else: t['grad'] += np.sum(grad, axis=0)
         
