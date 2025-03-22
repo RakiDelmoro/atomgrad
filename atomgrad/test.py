@@ -124,42 +124,46 @@ def classifier_test():
 
     print()
 
-def tensor_sum_test():
-    gen_w = [np.random.randn(2, 1, 1) for _ in range(5)]
+def test_combined_transition_weight():
+    gen_w = np.random.randn(2, 5)
     gen_vk_params = [np.random.randn(4, 4) for _ in range(5)]
-    gen_rt = np.zeros((2, 4), dtype=np.float32)
+    gen_rt = np.random.randn(2, 4)
+    gen_y = np.zeros((2, 4))
+    gen_y[np.arange(len(gen_y)), [np.random.randint(0, 2) for _ in range(len(gen_y))]] = 1
 
     # ATOM
-    rt = atom.tensor(np.zeros(shape=(2, 4), dtype=np.float32), requires_grad=True)
+    a_rt = atom.tensor(gen_rt, requires_grad=True)
+    a_vk_params = [atom.tensor(vk_params, requires_grad=True) for vk_params in gen_vk_params]
+    a_w = atom.tensor(gen_w, requires_grad=True)
 
-    weights = [np.random.randn(2, 1, 1) for _ in range(5)]
-    vk_params = [atom.tensor(np.random.randn(4, 4), requires_grad=True) for _ in range(5)]
-
-    tensors_to_sum = []
+    a_tensors_to_sum = []
     for i in range(5):
-        tensor = atom.mul(weights[i], vk_params[i])
-        tensors_to_sum.append(tensor)
+        w = atom.tensor(a_w['data'][:, i].reshape(-1, 1, 1), requires_grad=True)
+        tensor = atom.mul(w, a_vk_params[i], a_w, a_vk_params)
+        a_tensors_to_sum.append(tensor)
 
-    summed_tensor = atom.sum_tensor(tensors_to_sum)
-    grad = np.random.randn(2, 4, 4)
+    a_summed_tensor = atom.sum_tensor(a_tensors_to_sum)
 
-    act = atom.matmul_3d(summed_tensor, rt)
-    print(act['data'])
+    a_act = atom.matmul_3d(a_summed_tensor, a_rt)
+    grad = atom.softmax(a_act) - gen_y
+    atom.backward(a_act, grad)
 
-    '''⚠️'''
-    # Calling backward to the summed tensor. Doesn't call the grad fn of weights and parameters as result the gradients don't propagated to the weights and vk_parameters
-    atom.backward(summed_tensor, grad)
+    # TORCH
+    t_rt = torch.tensor(gen_rt, dtype=torch.float32, requires_grad=True)
+    t_vk_params = [torch.tensor(vk_params, dtype=torch.float32, requires_grad=True) for vk_params in gen_vk_params]
+    t_w = torch.tensor(gen_w, dtype=torch.float32, requires_grad=True)
+
+    t_summed_tensor = sum(t_w[:, idx].unsqueeze(-1).unsqueeze(-1) * t_vk_params[idx] for idx in range(5))
+    t_act = torch.einsum('bij,bj->bi', t_summed_tensor, t_rt)
+    loss = torch.nn.CrossEntropyLoss().forward(t_act, torch.tensor(gen_y, dtype=torch.float32, requires_grad=True))
+
+    t_act.retain_grad()
+    t_summed_tensor.retain_grad()
+    loss.backward()
+
     print()
-    '''🗝️'''
-    # It needs to call this in order to propagate the gradient to the weights and parameters
-    for idx in range(5):
-        atom.backward(tensors_to_sum[idx], summed_tensor['grad'])
 
-    #TODO: FIX the auto gradient calculation to the summed tensor and it's children inputs (weights, vk_parameters)
-
-    print()
-
-tensor_sum_test()
+test_combined_transition_weight()
 
 # classifier_test()
 # test_with_3d_shape()
