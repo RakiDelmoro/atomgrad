@@ -124,6 +124,43 @@ def classifier_test():
 
     print()
 
-classifier_test()
+def tensor_sum_test():
+    gen_w = [np.random.randn(2, 1, 1) for _ in range(5)]
+    gen_vk_params = [np.random.randn(4, 4) for _ in range(5)]
+    gen_rt = np.zeros((2, 4), dtype=np.float32)
+
+    # ATOM
+    rt = atom.tensor(np.zeros(shape=(2, 4), dtype=np.float32), requires_grad=True)
+
+    weights = [np.random.randn(2, 1, 1) for _ in range(5)]
+    vk_params = [atom.tensor(np.random.randn(4, 4), requires_grad=True) for _ in range(5)]
+
+    tensors_to_sum = []
+    for i in range(5):
+        tensor = atom.mul(weights[i], vk_params[i])
+        tensors_to_sum.append(tensor)
+
+    summed_tensor = atom.sum_tensor(tensors_to_sum)
+    grad = np.random.randn(2, 4, 4)
+
+    act = atom.matmul_3d(summed_tensor, rt)
+    print(act['data'])
+
+    '''⚠️'''
+    # Calling backward to the summed tensor. Doesn't call the grad fn of weights and parameters as result the gradients don't propagated to the weights and vk_parameters
+    atom.backward(summed_tensor, grad)
+    print()
+    '''🗝️'''
+    # It needs to call this in order to propagate the gradient to the weights and parameters
+    for idx in range(5):
+        atom.backward(tensors_to_sum[idx], summed_tensor['grad'])
+
+    #TODO: FIX the auto gradient calculation to the summed tensor and it's children inputs (weights, vk_parameters)
+
+    print()
+
+tensor_sum_test()
+
+# classifier_test()
 # test_with_3d_shape()
 # nn_forward_test()
