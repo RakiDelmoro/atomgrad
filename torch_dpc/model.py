@@ -35,9 +35,9 @@ class DPC(nn.Module):
         # Digit classifier only
         self.digit_classifier = nn.Linear(lower_dim, 10)
 
-    def forward(self, x_seq):
-        batch_size, seq_len, _ = x_seq.shape
-        device = x_seq.device
+    def forward(self, input_seq):
+        batch_size, seq_len, _ = input_seq.shape
+        device = input_seq.device
 
         # Initialize states
         rt = torch.zeros(batch_size, self.lower_dim, device=device)
@@ -49,14 +49,15 @@ class DPC(nn.Module):
 
         for t in range(seq_len):
             # Decode current frame
-            pred_xt = self.lower_level_network(rt)
-            error = x_seq[:, t] - pred_xt
+            # TODO: Figure out how torch calculated the predicted_frame gradients
+            predicted_frame = self.lower_level_network(rt)
+            frame_error = input_seq[:, t] - predicted_frame
 
             # Store prediction error
-            pred_errors.append(error.pow(2).mean())
+            pred_errors.append(frame_error.pow(2).mean())
 
             # Update higher level
-            rh = self.higher_rnn(error.detach(), rh)
+            rh = self.higher_rnn(frame_error.detach(), rh)
 
             # Generate transition weights
             w = self.hyper_network(rh)
@@ -75,7 +76,7 @@ class DPC(nn.Module):
         # Average predictions over time
         digit_logit = torch.stack(digit_logits).mean(0)
         pred_error = torch.stack(pred_errors).mean()
-        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, V
+        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, predicted_frame, frame_error
 
 def train(torch_model, atom_model, loader):
     optimizer = torch.optim.AdamW(torch_model.parameters(), lr=1e-3)
@@ -100,8 +101,6 @@ def train(torch_model, atom_model, loader):
         torch_loss_pred = torch_outputs['prediction_error']
         # Combine losses with regularization
         loss = (torch_loss_digit + 0.1 * torch_loss_pred + 0.01 * (torch_model.lower_level_network.weight.pow(2).mean()))
-
-        #TODO: Figure out what is the correct calculation for atom_prediction grad so far it's not satisfy the torch_prediction grad
 
         optimizer.zero_grad()
         loss.backward()
