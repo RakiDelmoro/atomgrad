@@ -18,10 +18,12 @@ def main_runner():
     torch_model = DPC(IMAGE_HEIGHT*IMAGE_WIDTH)
     atom_model = dynamic_predictive_coding(torch_model)
 
-    for _ in range(10):
+    for epoch in range(10):
         train_loader = image_data_batching(train_images, train_labels, batch_size=128, shuffle=True)
         test_loader = image_data_batching(test_images, test_labels, batch_size=128, shuffle=True)
         # train_runner(atom_model, train_loader, torch_model)
         train(torch_model, atom_model, train_loader)
+
+        print(f'EPOCH: {epoch+1}')
 
 main_runner()

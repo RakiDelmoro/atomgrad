@@ -43,15 +43,17 @@ def dynamic_predictive_coding(torch_model):
             for t in range(seq_len):
                 each_frame = batched_image['data'][:, t]
 
+                """TODO: Figure out how does torch calculate the gradient for predicted_frame"""
                 predicted_frame = f_pass.lower_network_forward(lower_level_state, lower_level_network_parameters)
                 avg_error, error = f_pass.prediction_frame_error(predicted_frame, each_frame)
 
+                """Gradient calculation satisfy torch 👇"""
                 # Use RnnCell to update the higher level state
                 higher_level_state = f_pass.rnn_forward(error, higher_level_state, higher_rnn_parameters, )
 
                 # Generate transition weights
                 generated_weights = f_pass.hyper_network_forward(higher_level_state, hyper_network_parameters, )
-                value = f_pass.combine_transitions(generated_weights, Vk_parameters)
+                value = f_pass.combine_transitions_weights(generated_weights, Vk_parameters)
 
                 # Update lower state with ReLU and noise
                 lower_level_state = f_pass.lower_net_state_update(lower_level_state, value)
@@ -66,6 +68,6 @@ def dynamic_predictive_coding(torch_model):
             model_digit_prediction = np.stack(digit_logits).mean(0)
             prediction_error = np.stack(pred_errors).mean()
 
-            return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, model_prediction, value, parameters
+            return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, model_prediction, lower_level_state, parameters
     
     return forward

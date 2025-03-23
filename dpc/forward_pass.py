@@ -30,10 +30,10 @@ def rnn_forward(input_data, hidden_state, parameters):
 
     return output
 
-def combine_transitions(weights, Vk_parameters):
+def combine_transitions_weights(weights, Vk_parameters):
     combined_transitions = []
     for k in range(len(Vk_parameters)):
-        transition = atom.mul(weights['data'][:, k].reshape(-1, 1, 1), Vk_parameters[k])
+        transition = atom.mul(weights['data'][:, k].reshape(-1, 1, 1), Vk_parameters[k], weights, Vk_parameters)
         combined_transitions.append(transition)
 
     return atom.sum_tensor(combined_transitions)
@@ -41,7 +41,7 @@ def combine_transitions(weights, Vk_parameters):
 def prediction_frame_error(predicted, expected):
     error = expected - predicted['data']
 
-    return np.mean(error**2), error
+    return np.mean(error**2), atom.tensor(error, requires_grad=True)
 
 def lower_net_state_update(lower_net_state, value):
     activation = atom.matmul_3d(value, lower_net_state)
