@@ -49,7 +49,7 @@ class DPC(nn.Module):
 
         for t in range(seq_len):
             # Decode current frame
-            # TODO: Figure out how torch calculated the predicted_frame gradients
+            # AHA! the calculation of derivative predicted_frame is: (-2 * frame_error / (B*C*T))
             predicted_frame = self.lower_level_network(rt)
             frame_error = input_seq[:, t] - predicted_frame
 
@@ -60,13 +60,13 @@ class DPC(nn.Module):
             rh = self.higher_rnn(frame_error.detach(), rh)
 
             # Generate transition weights
-            w = self.hyper_network(rh)
+            generated_weights = self.hyper_network(rh)
 
             # Combine transition matrices
-            V = sum(w[:, k].unsqueeze(-1).unsqueeze(-1) * self.Vk[k] for k in range(self.K))
+            value = sum(generated_weights[:, k].unsqueeze(-1).unsqueeze(-1) * self.Vk[k] for k in range(self.K))
             
             # Update lower state with ReLU and noise
-            rt = F.relu(torch.einsum('bij,bj->bi', V, rt)) #+ 0.01 * torch.randn_like(rt)
+            rt = F.relu(torch.einsum('bij,bj->bi', value, rt)) #+ 0.01 * torch.randn_like(rt)
 
             logit = self.digit_classifier(rt)
 
