@@ -218,19 +218,13 @@ def build_topo(nodes):
 def backward(atom_tensor, grad=None):
     """Compute gradients via reverse-mode autodiff."""
 
-    if not atom_tensor['requires_grad']:
-        return
-    
+    if not atom_tensor['requires_grad']: return
+
     topo = build_topo(atom_tensor)
-    if grad is None:
-        atom_tensor['grad'] = np.ones_like(atom_tensor['data'])
-    else:
-        atom_tensor['grad'] = grad
+    if grad is None: atom_tensor['grad'] = np.ones_like(atom_tensor['data'])
+    else: atom_tensor['grad'] = grad
     
     for node in reversed(topo):
         if node['grad_fn'] is not None:
             node['grad_fn'](node['grad'])
 
-def update(parameters: dict):
-    for _, params in parameters.items():
-        print(params)
