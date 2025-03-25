@@ -46,12 +46,15 @@ class DPC(nn.Module):
         # Storage for outputs
         pred_errors = []
         digit_logits = []
+        accum_grads = []
 
         for t in range(seq_len):
-            # Decode current frame
-            # AHA! the calculation of derivative predicted_frame is: (-2 * frame_error / (B*C*T))
+            # lower level network weight grad calculation is the sum of accum_grads / (128*5)
             predicted_frame = self.lower_level_network(rt)
             frame_error = input_seq[:, t] - predicted_frame
+
+            grad = -2 * (frame_error / frame_error.shape[-1])
+            accum_grads.append(torch.matmul(grad.T, rt))
 
             # Store prediction error
             pred_errors.append(frame_error.pow(2).mean())
@@ -64,19 +67,23 @@ class DPC(nn.Module):
 
             # Combine transition matrices
             value = sum(generated_weights[:, k].unsqueeze(-1).unsqueeze(-1) * self.Vk[k] for k in range(self.K))
-            
+
+            rt_noise = 0.01 * torch.randn_like(rt)
             # Update lower state with ReLU and noise
-            rt = F.relu(torch.einsum('bij,bj->bi', value, rt)) #+ 0.01 * torch.randn_like(rt)
+            rt = F.relu(torch.einsum('bij,bj->bi', value, rt)) + rt_noise
 
             logit = self.digit_classifier(rt)
 
             # Collect digit logits
             digit_logits.append(logit)
+            print('TORCH')
+            # print(f'Time step {t+1}: {rt.abs().max()}')
+            print(torch.mean(predicted_frame[0]))
 
         # Average predictions over time
         digit_logit = torch.stack(digit_logits).mean(0)
         pred_error = torch.stack(pred_errors).mean()
-        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, predicted_frame, frame_error
+        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, predicted_frame, rt, accum_grads
 
 def train(torch_model, atom_model, loader):
     optimizer = torch.optim.AdamW(torch_model.parameters(), lr=1e-3)
