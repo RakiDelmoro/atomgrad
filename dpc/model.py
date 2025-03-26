@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 import torch.nn as nn
 import atomgrad.atom as atom
@@ -17,7 +18,7 @@ def train_runner(model, dataloader, torch_model):
 def dynamic_predictive_coding(torch_model):
     """Initialize model parameters (from torch model)"""
     # Spatial decoder
-    lower_level_network_parameters = atom.tensor(torch_model.lower_level_network.weight.data.numpy(), requires_grad=True)
+    lower_level_network_parameters = atom.tensor(torch_model.lower_level_network.weight.data.numpy(), requires_grad=False)
     # Transition matrices
     Vk_parameters = [atom.tensor(vk.data.numpy(), requires_grad=True) for vk in torch_model.Vk]
     # Hypernetwork
@@ -27,9 +28,9 @@ def dynamic_predictive_coding(torch_model):
     # Digit classifier only
     digit_classifier_parameters = [atom.tensor(torch_model.digit_classifier.weight.data.numpy(), requires_grad=True), atom.tensor(torch_model.digit_classifier.bias.data.numpy(), requires_grad=True)]
 
-    parameters = {'lower_network_parameters': lower_level_network_parameters, 'Vk_parameters': Vk_parameters, 'hyper_network_parameters': hyper_network_parameters, 'higher_rnn_parameters': higher_rnn_parameters, 'digit_classifier_parameters': digit_classifier_parameters}
+    parameters = {'lower_network': lower_level_network_parameters, 'vk': Vk_parameters, 'hyper_network': hyper_network_parameters, 'higher_rnn': higher_rnn_parameters, 'digit_classifier': digit_classifier_parameters}
 
-    def forward(batched_image):
+    def forward(batched_image, noises):
             batch_size, seq_len, _ = batched_image['data'].shape
 
             # Initialize states
@@ -39,23 +40,28 @@ def dynamic_predictive_coding(torch_model):
             # Storage for outputs
             pred_errors = []
             digit_logits = []
+            t_grads = []
+
+            atom_outs = []
 
             for t in range(seq_len):
                 each_frame = batched_image['data'][:, t]
 
-                # The predicted_frame gradient is - 2 * (error / (T*B*C))
                 predicted_frame = f_pass.lower_network_forward(lower_level_state, lower_level_network_parameters)
-                avg_error, error = f_pass.prediction_frame_error(predicted_frame, each_frame)
+                avg_error, frame_error = f_pass.prediction_frame_error(predicted_frame, each_frame)
+
+                each_t_grad = -2 * (frame_error['data'] / frame_error['shape'][-1])
+                t_grads.append(np.matmul(each_t_grad.T, lower_level_state['data']))
 
                 # Use RnnCell to update the higher level state
-                higher_level_state = f_pass.rnn_forward(error, higher_level_state, higher_rnn_parameters, )
+                higher_level_state = f_pass.rnn_forward(frame_error, higher_level_state, higher_rnn_parameters)
 
                 # Generate transition weights
-                generated_weights = f_pass.hyper_network_forward(higher_level_state, hyper_network_parameters, )
+                generated_weights = f_pass.hyper_network_forward(higher_level_state, hyper_network_parameters)
                 value = f_pass.combine_transitions_weights(generated_weights, Vk_parameters)
 
                 # Update lower state with ReLU and noise
-                lower_level_state = f_pass.lower_net_state_update(lower_level_state, value)
+                lower_level_state = f_pass.lower_net_state_update(lower_level_state, value, noises[t])
 
                 # Collect digit logits
                 model_prediction = f_pass.classifier_forward(lower_level_state, digit_classifier_parameters)
@@ -63,10 +69,12 @@ def dynamic_predictive_coding(torch_model):
                 digit_logits.append(model_prediction['data'])
                 # Store frame prediction error
                 pred_errors.append(avg_error)
-            
+
+                atom_outs.append(lower_level_state['data'])
+
             model_digit_prediction = np.stack(digit_logits).mean(0)
             prediction_error = np.stack(pred_errors).mean()
 
-            return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, model_prediction, error, predicted_frame, parameters
+            return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, model_prediction, parameters, atom_outs
     
     return forward
