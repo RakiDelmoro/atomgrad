@@ -43,9 +43,10 @@ def prediction_frame_error(predicted, expected):
 
     return np.mean(error**2), atom.tensor(error, requires_grad=True)
 
-def lower_net_state_update(lower_net_state, value):
+def lower_net_state_update(lower_net_state, value, noise):
     activation = atom.matmul_3d(value, lower_net_state)
-    updated_lower_net_state = activation['data'] #+ 0.01 * np.random.randn(*lower_net_state['shape'])
+    #+ 0.01 * np.random.randn(*lower_net_state['shape'])
+    updated_lower_net_state = activation['data'] + noise.numpy()
 
     return atom.relu(updated_lower_net_state, requires_grad=True)
 
