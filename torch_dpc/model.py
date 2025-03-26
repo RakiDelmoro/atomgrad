@@ -48,6 +48,10 @@ class DPC(nn.Module):
         digit_logits = []
         accum_grads = []
 
+        rt_noises = []
+
+        torch_outs = []
+
         for t in range(seq_len):
             # lower level network weight grad calculation is the sum of accum_grads / (128*5)
             predicted_frame = self.lower_level_network(rt)
@@ -70,20 +74,22 @@ class DPC(nn.Module):
 
             rt_noise = 0.01 * torch.randn_like(rt)
             # Update lower state with ReLU and noise
-            rt = F.relu(torch.einsum('bij,bj->bi', value, rt)) + rt_noise
+            # rt =  F.relu(torch.matmul(value, rt.unsqueeze(-1))).squeeze(-1) + rt_noise
+            rt = F.relu(torch.einsum('bij,bj->bi', value, rt) + rt_noise)
 
             logit = self.digit_classifier(rt)
 
             # Collect digit logits
             digit_logits.append(logit)
-            print('TORCH')
-            # print(f'Time step {t+1}: {rt.abs().max()}')
-            print(torch.mean(predicted_frame[0]))
+
+            rt_noises.append(rt_noise)
+
+            torch_outs.append(rt)
 
         # Average predictions over time
         digit_logit = torch.stack(digit_logits).mean(0)
         pred_error = torch.stack(pred_errors).mean()
-        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, predicted_frame, rt, accum_grads
+        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, logit, rt_noises, torch_outs
 
 def train(torch_model, atom_model, loader):
     optimizer = torch.optim.AdamW(torch_model.parameters(), lr=1e-3)
