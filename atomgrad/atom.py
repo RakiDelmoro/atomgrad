@@ -22,11 +22,11 @@ def add(x1, x2):
     
     def grad_fn(grad):
         if x1['requires_grad']:
-            x1['grad'] = np.zeros_like(x1['data'])
+            # x1['grad'] = np.zeros_like(x1['data'])
             if x1['grad'].ndim == grad.ndim: x1['grad'] += grad
             else: x1['grad'] += np.sum(grad, axis=0)
         if x2['requires_grad']:
-            x2['grad'] = np.zeros_like(x2['data'])
+            # x2['grad'] = np.zeros_like(x2['data'])
             if x2['grad'].ndim == grad.ndim: x2['grad'] += grad
             else: x2['grad'] += np.sum(grad, axis=0)
 
@@ -42,8 +42,12 @@ def relu(x, requires_grad=False):
 
     def grad_fn(grad):
         if requires_grad:
-            x['grad'] = np.zeros_like(x['data'])
-            x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
+            # x['grad'] = np.zeros_like(x['data'])
+            if x['grad'].ndim == grad.ndim:
+                x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
+            else:
+                grad = np.sum(grad, axis=-1)
+                x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
     result['grad_fn'] = grad_fn
 
     return result
@@ -63,6 +67,39 @@ def sub(x1, x2):
 
     return tensor(x1['data'] - x2['data'], requires_grad)
 
+
+def broadcasting_mul(x1, x2):
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+
+    broadcasting_results = []
+    for i in range(len(x2)):
+        w = x1['data'][:, i].reshape(-1, 1, 1)
+        result = w * x2[i]['data']
+        broadcasting_results.append(result)
+
+    result = tensor(broadcasting_results, requires_grad=requires_grad)
+    result['depends_on'] = [x1, x2]
+
+    def grad_fn(grad):
+        grad = grad[0]
+        # for each in grad:
+        if x1['requires_grad']:
+            # grad_summed = np.sum(grad, axis=(-1, -2))
+            # grad_reshaped = grad_summed.reshape(-1, 1, 1)
+            # Initialize gradient for x1 (t_w)
+            # x1['grad'] = np.zeros((x1['data'].shape[0], len(x2)))
+            # Accumulate gradients for each vk_param
+            for i in range(len(x2)):
+                # Multiply by vk_params[i]['data'], then sum over extra dimensions
+                x1['grad'][:, i] += np.sum(grad * x2[i]['data'][np.newaxis, :, :], axis=(1, 2))
+
+        if x2[0]['requires_grad']:
+            for i, each in enumerate(x2):
+                each['grad'] += np.sum(grad * x1['data'][:, i].reshape(-1, 1, 1), axis=0)
+    result['grad_fn'] = grad_fn
+
+    return result
+
 def mul(x1, x2, weights, vk_params):
     if isinstance(x1, np.ndarray): x1 = tensor(x1)
     if isinstance(x2, np.ndarray): x2 = tensor(x2)
@@ -74,14 +111,22 @@ def mul(x1, x2, weights, vk_params):
     def grad_fn(grad):
         """Backward function for multiplication."""
         if x1['requires_grad']:
+            # grad_summed = np.sum(grad, axis=(-1, -2))
+            # grad_reshaped = grad_summed.reshape(-1, 1, 1)
+            # Initialize gradient for x1 (t_w)
             x1['grad'] = np.zeros((x1['data'].shape[0], len(vk_params)))
-            for i in range(len(vk_params)):
-                x1['grad'][:, i] += np.sum(np.sum(grad * vk_params[i]['data'], axis=-1), axis=-1)
 
-            weights['grad'] = x1['grad']
+            # Accumulate gradients for each vk_param
+            for i in range(len(vk_params)):
+                # Multiply by vk_params[i]['data'], then sum over extra dimensions
+                x1['grad'][:, i] += np.sum(grad * vk_params[i]['data'][np.newaxis, :, :], axis=(1, 2))
+
+            # if I use this instead of broadcasting should I need to call backward in this function which I don't want.
+            # weights['grad'] = x1['grad']
+            backward(weights, x1['grad'])
 
         if x2['requires_grad']:
-            x2['grad'] = np.zeros_like(x2['data'])
+            # x2['grad'] = np.zeros_like(x2['data'])
             # It is np.sum if the different shape with x2['grad'] ???
             x2['grad'] += np.sum(grad * x1['data'], axis=0)
     result['grad_fn'] = grad_fn
@@ -99,8 +144,8 @@ def matmul(x1, x2):
 
     def grad_fn(grad):
         # Zero grad
-        x1['grad'] = np.zeros_like(x1['data'])
-        x2['grad'] = np.zeros_like(x2['data'])
+        # x1['grad'] = np.zeros_like(x1['data'])
+        # x2['grad'] = np.zeros_like(x2['data'])
 
         if x1['requires_grad']:
             x1['grad'] += (grad @ x2['data'])
@@ -165,8 +210,8 @@ def matmul_3d(x1, x2):
     
     def grad_fn(grad):
         # Zero grad
-        x1['grad'] = np.zeros_like(x1['data'])
-        x2['grad'] = np.zeros_like(x1['data'])
+        # x1['grad'] = np.zeros_like(x1['data'])
+        # x2['grad'] = np.zeros_like(x1['data'])
 
         if is_x1_3d and not is_x2_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
             if x1['requires_grad']:
@@ -186,17 +231,18 @@ def matmul_3d(x1, x2):
     result['grad_fn'] = grad_fn
     return result
 
-def sum_tensor(list_tensor):
-    result = tensor(sum([t['data'] for t in list_tensor]), requires_grad=True)
-    #??? depennds_on instead of depends_on
-    result['depends_on'] = [t for t in list_tensor]
+def sum_tensor(x):
+    result = tensor(sum([t for t in x['data']]), requires_grad=True)
+    result['depends_on'] = [x]
 
     def grad_fn(grad):
-        for t in list_tensor:
-            t['grad'] = np.zeros_like(t['data'])
-            if t['data'].ndim == grad.ndim: t['grad'] += grad
-            else: t['grad'] += np.sum(grad, axis=0)
-        
+        for i in range(len(x['data'])):
+            # t['grad'] = np.zeros_like(t['data'])
+            if x['grad'].ndim == grad.ndim:
+                x['grad'][i] += grad
+            else:
+                x['grad'][i] += np.sum(grad, axis=0)
+
     result['grad_fn'] = grad_fn
     return result
 
@@ -209,8 +255,13 @@ def build_topo(nodes):
         node_identity = id(node)
         if node_identity not in visited:
             visited.add(node_identity)
-            for depends_on in node['depends_on']:
-                visit(depends_on)
+            if type(node) == list:
+                for each in node:
+                    for depends_on in each['depends_on']:
+                        visit(depends_on)
+            else:
+                for depends_on in node['depends_on']:
+                    visit(depends_on)
             topo.append(node)
     visit(nodes)
     return topo
@@ -221,10 +272,15 @@ def backward(atom_tensor, grad=None):
     if not atom_tensor['requires_grad']: return
 
     topo = build_topo(atom_tensor)
-    if grad is None: atom_tensor['grad'] = np.ones_like(atom_tensor['data'])
+    if grad is None: atom_tensor['grad'] = np.ones_like(atom_tensor['data']) if atom_tensor['grad'] is None else atom_tensor['grad']
     else: atom_tensor['grad'] = grad
     
     for node in reversed(topo):
-        if node['grad_fn'] is not None:
-            node['grad_fn'](node['grad'])
+        if type(node) == list:
+            for each in node:
+                if each['grad_fn'] is not None:
+                    each['grad_fn'](each['grad'])
+        else:
+            if node['grad_fn'] is not None:
+                node['grad_fn'](node['grad'])
 
