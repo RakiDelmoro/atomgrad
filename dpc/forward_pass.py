@@ -7,17 +7,10 @@ def lower_network_forward(input_data, parameters):
 
     return activation
 
-def hyper_network_forward(input_data, parameters):
-    activation = input_data
-    for each in range(len(parameters)):
-        last_layer = each == len(parameters)-1
-        weights = parameters[each][0]
-        bias = parameters[each][1]
+def prediction_frame_error(predicted, expected):
+    error = expected - predicted['data']
 
-        pre_activation = atom.add(atom.matmul(activation, weights), bias)
-        activation = pre_activation if last_layer else atom.relu(pre_activation)
-
-    return activation
+    return np.mean(error**2), atom.tensor(error, requires_grad=True)
 
 def rnn_forward(input_data, hidden_state, parameters):
     input_to_hidden_params = parameters[0]
@@ -26,9 +19,21 @@ def rnn_forward(input_data, hidden_state, parameters):
     input_to_hidden_activation = atom.add(atom.matmul(input_data, input_to_hidden_params[0]), input_to_hidden_params[1])
     hidden_to_hidden_activation = atom.add(atom.matmul(hidden_state, hidden_to_hidden_params[0]), hidden_to_hidden_params[1])
 
-    output = atom.relu(atom.add(input_to_hidden_activation, hidden_to_hidden_activation))
+    output = atom.relu(atom.add(input_to_hidden_activation, hidden_to_hidden_activation), requires_grad=True)
 
     return output
+
+def hyper_network_forward(input_data, parameters):
+    activation = input_data
+    for each in range(len(parameters)):
+        last_layer = each == len(parameters)-1
+        weights = parameters[each][0]
+        bias = parameters[each][1]
+
+        pre_activation = atom.add(atom.matmul(activation, weights), bias)
+        activation = pre_activation if last_layer else atom.relu(pre_activation, requires_grad=True)
+
+    return activation
 
 def combine_transitions_weights(weights, Vk_parameters):
     combined_transitions = []
@@ -38,15 +43,11 @@ def combine_transitions_weights(weights, Vk_parameters):
 
     return atom.sum_tensor(combined_transitions)
 
-def prediction_frame_error(predicted, expected):
-    error = expected - predicted['data']
-
-    return np.mean(error**2), atom.tensor(error, requires_grad=True)
-
 def lower_net_state_update(lower_net_state, value, noise):
     activation = atom.matmul_3d(value, lower_net_state)
     #+ 0.01 * np.random.randn(*lower_net_state['shape'])
-    updated_lower_net_state = activation['data'] + noise.numpy()
+    atom_noise = atom.tensor(noise.numpy())
+    updated_lower_net_state = atom.add(activation, atom_noise)
 
     return atom.relu(updated_lower_net_state, requires_grad=True)
 
