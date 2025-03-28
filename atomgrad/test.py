@@ -153,14 +153,7 @@ def test_combined_transition_weight():
     a_hyper_act = atom.tensor(gen_hyper_act, requires_grad=True)
     a_w = atom.add(atom.matmul(a_hyper_act, a_hyper_w), a_hyper_b)
 
-    # combine transition weight
-    # a_tensors_to_sum = []
-    # for i in range(5):
-    #     w = atom.tensor(a_w['data'][:, i].reshape(-1, 1, 1), requires_grad=True)
-    #     tensor = atom.mul(w, a_vk_params[i], a_w, a_vk_params)
-    #     a_tensors_to_sum.append(tensor)
-
-    a_tensors_to_sum = atom.broadcasting_mul(a_w, a_vk_params)
+    a_tensors_to_sum = atom.broadcasted_mul(a_w, a_vk_params)
 
     # Lower net update
     a_summed_tensor = atom.sum_tensor(a_tensors_to_sum)
@@ -199,7 +192,6 @@ def test_combined_transition_weight():
     # Classifier
     t_act = torch.matmul(t_relu_act, t_class_w.T) + t_class_b
     loss = torch.nn.CrossEntropyLoss().forward(t_act, torch.tensor(gen_y, dtype=torch.float32, requires_grad=True))
-
 
     t_tensor_to_sum[0].retain_grad()
     t_tensor_to_sum[1].retain_grad()
