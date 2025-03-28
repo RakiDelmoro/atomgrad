@@ -72,7 +72,7 @@ def dynamic_predictive_coding(torch_model):
 
                 atom_outs.append(lower_level_state['data'])
 
-            model_digit_prediction = np.stack(digit_logits).mean(0)
+            model_digit_prediction = digit_logits
             prediction_error = np.stack(pred_errors).mean()
 
             return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, model_prediction, parameters, atom_outs
