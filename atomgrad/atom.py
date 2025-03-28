@@ -68,7 +68,7 @@ def sub(x1, x2):
     return tensor(x1['data'] - x2['data'], requires_grad)
 
 
-def broadcasting_mul(x1, x2):
+def broadcasted_mul(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
     broadcasting_results = []
@@ -237,11 +237,7 @@ def sum_tensor(x):
 
     def grad_fn(grad):
         for i in range(len(x['data'])):
-            # t['grad'] = np.zeros_like(t['data'])
-            if x['grad'].ndim == grad.ndim:
-                x['grad'][i] += grad
-            else:
-                x['grad'][i] += np.sum(grad, axis=0)
+            x['grad'][i] += grad
 
     result['grad_fn'] = grad_fn
     return result
