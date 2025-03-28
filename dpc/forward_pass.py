@@ -36,17 +36,14 @@ def hyper_network_forward(input_data, parameters):
     return activation
 
 def combine_transitions_weights(weights, Vk_parameters):
-    combined_transitions = []
-    for k in range(len(Vk_parameters)):
-        transition = atom.mul(weights['data'][:, k].reshape(-1, 1, 1), Vk_parameters[k], weights, Vk_parameters)
-        combined_transitions.append(transition)
+    combined_transitions = atom.broadcasted_mul(weights, Vk_parameters)
 
-    return atom.sum_tensor(combined_transitions)
+    return atom.sum_tensors(combined_transitions)
 
 def lower_net_state_update(lower_net_state, value, noise):
     activation = atom.matmul_3d(value, lower_net_state)
-    #+ 0.01 * np.random.randn(*lower_net_state['shape'])
-    atom_noise = atom.tensor(noise.numpy())
+    # noise = 0.01 * np.random.randn(*lower_net_state['shape'])
+    atom_noise = atom.tensor(noise)
     updated_lower_net_state = atom.add(activation, atom_noise)
 
     return atom.relu(updated_lower_net_state, requires_grad=True)
