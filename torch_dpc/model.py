@@ -46,7 +46,7 @@ class DPC(nn.Module):
         # Storage for outputs
         pred_errors = []
         digit_logits = []
-        accum_grads = []
+        # accum_grads = []
 
         rt_noises = []
 
@@ -57,8 +57,8 @@ class DPC(nn.Module):
             predicted_frame = self.lower_level_network(rt)
             frame_error = input_seq[:, t] - predicted_frame
 
-            grad = -2 * (frame_error / frame_error.shape[-1])
-            accum_grads.append(torch.matmul(grad.T, rt))
+            # grad = -2 * (frame_error / frame_error.shape[-1])
+            # accum_grads.append(torch.matmul(grad.T, rt))
 
             # Store prediction error
             pred_errors.append(frame_error.pow(2).mean())
@@ -89,7 +89,7 @@ class DPC(nn.Module):
         # Average predictions over time
         digit_logit = torch.stack(digit_logits).mean(0)
         pred_error = torch.stack(pred_errors).mean()
-        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, logit, rt_noises, torch_outs
+        return {'digit_prediction': digit_logit, 'prediction_error': pred_error}, generated_weights(), rt_noises, torch_outs
 
 def train(torch_model, atom_model, loader):
     optimizer = torch.optim.AdamW(torch_model.parameters(), lr=1e-3)
