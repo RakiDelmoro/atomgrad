@@ -1,7 +1,6 @@
 import numpy as np
 import torch.nn as nn
 import atomgrad.atom as atom
-import dpc.forward_pass as f_pass
 
 def lower_network_forward(input_data, parameters):
     activation = atom.matmul(input_data, parameters)
