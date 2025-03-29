@@ -13,7 +13,7 @@ def add(x1, x2):
 
     result = tensor(x1['data'] + x2['data'], requires_grad)
     result['depends_on'] = [x1, x2]
-    
+
     def grad_fn(grad):
         if x1['requires_grad']:
             if x1['grad'].ndim == grad.ndim:
@@ -50,7 +50,7 @@ def relu(x, requires_grad=False):
 
 def softmax(x):
     # Subtract max value for numerical stability
-    shifted_data = x['data']- np.max(x['data'], axis=-1, keepdims=True)
+    shifted_data = x['data'] - np.max(x['data'], axis=-1, keepdims=True)
     # Calculate exp
     exp_data = np.exp(shifted_data)
     # Sum along axis=1 and keep dimensions for broadcasting
@@ -214,6 +214,17 @@ def sum_tensors(x):
     def grad_fn(grad):
         for i in range(len(x['data'])):
             x['grad'][i] += grad
+
+    result['grad_fn'] = grad_fn
+    return result
+
+def mean_tensor(x, axis=0):
+    result = tensor(np.stack([t['data'] for t in x]).mean(axis), requires_grad=True)
+    result['depends_on'] = [i for i in x]
+
+    def grad_fn(grad):
+        for each_act in x:
+            each_act['grad'] += grad
 
     result['grad_fn'] = grad_fn
     return result
