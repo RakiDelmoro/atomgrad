@@ -1,19 +1,51 @@
-import torch
 import numpy as np
 import torch.nn as nn
 import atomgrad.atom as atom
 import dpc.forward_pass as f_pass
-from dataset.utils import text_label_one_hot
 
-def train_runner(model, dataloader, torch_model):
-    for batched_image, batched_label in dataloader:
-        # From (Batch, height*width) to (Batch, seq_len, height*width)
-        batched_image = atom.tensor(batched_image.view(batched_image.size(0), -1, 28*28).repeat(1, 5, 1).numpy())
-        batched_label = atom.tensor(text_label_one_hot(batched_label.numpy()))
+def lower_network_forward(input_data, parameters):
+    activation = atom.matmul(input_data, parameters)
+    return activation
 
-        model_outputs = model(batched_image)
-        digit_prediction = model_outputs['prediction']
-        prediction_error = model_outputs['prediction_frame_error']
+def prediction_frame_error(predicted, expected):
+    error = expected - predicted['data']
+    return np.mean(error**2), atom.tensor(error, requires_grad=True)
+
+def rnn_forward(input_data, hidden_state, parameters):
+    input_to_hidden_params = parameters[0]
+    hidden_to_hidden_params = parameters[1]
+
+    input_to_hidden_activation = atom.add(atom.matmul(input_data, input_to_hidden_params[0]), input_to_hidden_params[1])
+    hidden_to_hidden_activation = atom.add(atom.matmul(hidden_state, hidden_to_hidden_params[0]), hidden_to_hidden_params[1])
+    output = atom.relu(atom.add(input_to_hidden_activation, hidden_to_hidden_activation), requires_grad=True)
+    return output
+
+def hyper_network_forward(input_data, parameters):
+    activation = input_data
+    for each in range(len(parameters)):
+        last_layer = each == len(parameters)-1
+        weights = parameters[each][0]
+        bias = parameters[each][1]
+        pre_activation = atom.add(atom.matmul(activation, weights), bias)
+        activation = pre_activation if last_layer else atom.relu(pre_activation, requires_grad=True)
+    return activation
+
+def combine_transitions_weights(weights, Vk_parameters):
+    combined_transitions = atom.broadcasted_mul(weights, Vk_parameters)
+    return atom.sum_tensors(combined_transitions)
+
+def lower_net_state_update(lower_net_state, value):
+    activation = atom.matmul_3d(value, lower_net_state)
+    noise = 0.01 * np.random.randn(*lower_net_state['shape'])
+    atom_noise = atom.tensor(noise)
+    updated_lower_net_state = atom.add(activation, atom_noise)
+    return atom.relu(updated_lower_net_state, requires_grad=True)
+
+def classifier_forward(input_data, parameters):
+    weights = parameters[0]
+    bias = parameters[1]
+    activation = atom.add(atom.matmul(input_data, weights), bias)
+    return activation
 
 def dynamic_predictive_coding(torch_model):
     """Initialize model parameters (from torch model)"""
@@ -30,7 +62,7 @@ def dynamic_predictive_coding(torch_model):
 
     parameters = {'lower_network': lower_level_network_parameters, 'vk': Vk_parameters, 'hyper_network': hyper_network_parameters, 'higher_rnn': higher_rnn_parameters, 'digit_classifier': digit_classifier_parameters}
 
-    def forward(batched_image, noises):
+    def forward(batched_image):
             batch_size, seq_len, _ = batched_image['data'].shape
 
             # Initialize states
@@ -40,41 +72,34 @@ def dynamic_predictive_coding(torch_model):
             # Storage for outputs
             pred_errors = []
             digit_logits = []
-            t_grads = []
-
-            atom_outs = []
 
             for t in range(seq_len):
                 each_frame = batched_image['data'][:, t]
 
-                predicted_frame = f_pass.lower_network_forward(lower_level_state, lower_level_network_parameters)
-                avg_error, frame_error = f_pass.prediction_frame_error(predicted_frame, each_frame)
-
-                each_t_grad = -2 * (frame_error['data'] / frame_error['shape'][-1])
-                t_grads.append(np.matmul(each_t_grad.T, lower_level_state['data']))
+                predicted_frame = lower_network_forward(lower_level_state, lower_level_network_parameters)
+                avg_error, frame_error = prediction_frame_error(predicted_frame, each_frame)
 
                 # Use RnnCell to update the higher level state
-                higher_level_state = f_pass.rnn_forward(frame_error, higher_level_state, higher_rnn_parameters)
+                higher_level_state = rnn_forward(frame_error, higher_level_state, higher_rnn_parameters)
 
                 # Generate transition weights
-                generated_weights = f_pass.hyper_network_forward(higher_level_state, hyper_network_parameters)
-                value = f_pass.combine_transitions_weights(generated_weights, Vk_parameters)
+                generated_weights = hyper_network_forward(higher_level_state, hyper_network_parameters)
+                
+                value = combine_transitions_weights(generated_weights, Vk_parameters)
 
                 # Update lower state with ReLU and noise
-                lower_level_state = f_pass.lower_net_state_update(lower_level_state, value, noises[t])
+                lower_level_state = lower_net_state_update(lower_level_state, value)
 
                 # Collect digit logits
-                model_prediction = f_pass.classifier_forward(lower_level_state, digit_classifier_parameters)
+                model_prediction = classifier_forward(lower_level_state, digit_classifier_parameters)
 
-                digit_logits.append(model_prediction['data'])
+                digit_logits.append(model_prediction)
                 # Store frame prediction error
                 pred_errors.append(avg_error)
 
-                atom_outs.append(lower_level_state['data'])
-
-            model_digit_prediction = digit_logits
+            model_digit_prediction = atom.mean_tensor(digit_logits, axis=0)
             prediction_error = np.stack(pred_errors).mean()
 
-            return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, model_prediction, parameters, atom_outs
-    
+            return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}, parameters
+
     return forward
