@@ -1,0 +1,71 @@
+import atomgrad.atom as atom
+import atomgrad.nn_ops as nn_ops
+import numpy as np
+import atomgrad.activation_ops as act_ops
+import atomgrad.optimizer as opt
+import random
+from features import GREEN, RED, RESET
+
+def mlp():
+    linear_1, w1, b1 = nn_ops.linear_layer(784, 2000)
+    activation = act_ops.relu()
+    linear_2, w2, b2 = nn_ops.linear_layer(2000, 10)
+
+    #TODO: Create a function that automatically get the parameters of the network
+    parameters = [w1, b1, w2, b2]
+
+    def forward(data):
+        linear_1_out = linear_1(data)
+        neuron_activation = activation(linear_1_out)
+        linear_2_out = linear_2(neuron_activation)
+
+        return linear_2_out
+    
+    def cross_entropy_loss(prediction, expected):
+        prediction_probs = atom.softmax(prediction)
+        grad = (prediction_probs - expected.numpy())
+        avg_loss = -np.mean(np.sum(expected.numpy() * np.log(prediction_probs), axis=-1))
+
+        return avg_loss, grad
+
+    def training_phase(dataloader):
+        each_batch_loss = []
+        for input_batched, label_batched in dataloader:
+            input_batched = atom.tensor(input_batched, requires_grad=True)
+            model_prediction = forward(input_batched)
+            avg_loss, gradients = cross_entropy_loss(model_prediction, label_batched)
+            
+            opt.zero_grad(parameters)
+            atom.backward(model_prediction, gradients)
+            opt.step(input_batched['data'].shape[0], parameters)
+
+            each_batch_loss.append(avg_loss)
+            # print(avg_loss)
+
+        return np.mean(np.array(each_batch_loss))
+    
+    def testing_phase(dataloader):
+        accuracy = []
+        correctness = []
+        wrongness = []
+        for i, (batched_image, batched_label) in enumerate(dataloader):
+            batched_image = atom.tensor(batched_image, requires_grad=True)
+            batched_label = batched_label.numpy()
+
+            model_pred_probabilities = forward(batched_image)['data']
+            batch_accuracy = (model_pred_probabilities.argmax(axis=-1) == batched_label.argmax(axis=-1)).mean()
+            for each in range(len(batched_label)//10):
+                model_prediction = model_pred_probabilities[each].argmax()
+                if model_prediction == batched_label[each].argmax(axis=-1): correctness.append((model_prediction.item(), batched_label[each].argmax(axis=-1).item()))
+                else: wrongness.append((model_prediction.item(), batched_label[each].argmax(axis=-1).item()))
+            print(f'Number of samples: {i+1}\r', end='', flush=True)
+            accuracy.append(np.mean(batch_accuracy))
+        random.shuffle(correctness)
+        random.shuffle(wrongness)
+        print(f'{GREEN}Model Correct Predictions{RESET}')
+        [print(f"Digit Image is: {GREEN}{expected}{RESET} Model Prediction: {GREEN}{prediction}{RESET}") for i, (prediction, expected) in enumerate(correctness) if i < 5]
+        print(f'{RED}Model Wrong Predictions{RESET}')
+        [print(f"Digit Image is: {RED}{expected}{RESET} Model Prediction: {RED}{prediction}{RESET}") for i, (prediction, expected) in enumerate(wrongness) if i < 5]
+        return np.mean(np.array(accuracy)).item()
+
+    return training_phase, testing_phase
