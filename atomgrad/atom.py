@@ -30,34 +30,6 @@ def add(x1, x2):
 
     return result
 
-def relu(x, requires_grad=False):
-    if isinstance(x, np.ndarray): x = tensor(x)
-
-    result = tensor(np.maximum(0, x['data']), requires_grad)
-    result['depends_on'] = [x]
-
-    def grad_fn(grad):
-        if requires_grad:
-            # x['grad'] = np.zeros_like(x['data'])
-            if x['grad'].ndim == grad.ndim:
-                x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
-            else:
-                grad = np.sum(grad, axis=-1)
-                x['grad'] = (np.where(result['data'] > 0, 1, 0) * grad)
-    result['grad_fn'] = grad_fn
-
-    return result
-
-def softmax(x):
-    # Subtract max value for numerical stability
-    shifted_data = x['data'] - np.max(x['data'], axis=-1, keepdims=True)
-    # Calculate exp
-    exp_data = np.exp(shifted_data)
-    # Sum along axis=1 and keep dimensions for broadcasting
-    sum_exp_data = np.sum(exp_data, axis=-1, keepdims=True)
-
-    return exp_data / sum_exp_data
-
 def sub(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
@@ -124,7 +96,7 @@ def matmul(x1, x2):
 
     def grad_fn(grad):
         if x1['requires_grad']:
-            x1['grad'] += (grad @ x2['data'])
+            x1['grad'] += ((grad @ x2['data'])) 
         if x2['requires_grad']:
             x2['grad'] += (grad.T @ x1['data']) 
     result['grad_fn'] = grad_fn
@@ -219,7 +191,7 @@ def sum_tensors(x):
     return result
 
 def mean_tensor(x, axis=0):
-    result = tensor(np.stack([t['data'] for t in x]).mean(axis), requires_grad=True)
+    result = tensor(np.stack([t['data'] for t in x]).mean(axis=axis), requires_grad=True)
     result['depends_on'] = [i for i in x]
 
     def grad_fn(grad):
