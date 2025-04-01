@@ -62,7 +62,7 @@ def broadcasted_mul(x1, x2):
 
     return result
 
-def mul(x1, x2, weights, vk_params):
+def mul(x1, x2):
     if isinstance(x1, np.ndarray): x1 = tensor(x1)
     if isinstance(x2, np.ndarray): x2 = tensor(x2)
 
@@ -73,14 +73,9 @@ def mul(x1, x2, weights, vk_params):
     def grad_fn(grad):
         """Backward function for multiplication."""
         if x1['requires_grad']:
-            x1['grad'] = np.zeros((x1['data'].shape[0], len(vk_params)))
-            # Accumulate gradients for each vk_param
-            for i in range(len(vk_params)):
-                # Multiply by vk_params[i]['data'], then sum over extra dimensions
-                x1['grad'][:, i] += np.sum(grad * vk_params[i]['data'][np.newaxis, :, :], axis=(1, 2))
-
+            x1['grad'] += grad * x2['data']
         if x2['requires_grad']:
-            x2['grad'] += np.sum(grad * x1['data'], axis=0)
+            x2['grad'] += grad * x1['data']
     result['grad_fn'] = grad_fn
 
     return result
