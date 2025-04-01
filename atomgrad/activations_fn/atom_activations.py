@@ -11,4 +11,3 @@ def leaky_relu():
 
 def tanh():
     def forward(atom_tensor): return act.tanh_ops(atom_tensor)
-
