@@ -15,7 +15,7 @@ def main_runner():
 
     train_runner, test_runner = mlp()
 
-    for epoch in range(10):
+    for epoch in range(20):
         train_loader = image_data_batching(train_images, train_labels, batch_size=128, shuffle=True)
         test_loader = image_data_batching(test_images, test_labels, batch_size=128, shuffle=True)
 
@@ -24,4 +24,3 @@ def main_runner():
         print(f"EPOCH: {epoch+1} Loss: {train_loss} Accuracy: {accuracy}")
 
 main_runner()
-
