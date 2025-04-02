@@ -9,7 +9,7 @@ def matmul_3d(x1: np.ndarray, x2: np.ndarray):
     is_x1_3d = len(x1_shape) == 3
     is_x2_3d = len(x2_shape) == 3
 
-    if not is_x1_3d and is_x2_3d:
+    if not is_x1_3d and not is_x2_3d:
         raise ValueError(f"Should have 3d shape {x1.shape} {x2.shape}")
 
     if not is_x1_3d and not is_x2_3d: result_data = np.matmul(x1, x2.T)
