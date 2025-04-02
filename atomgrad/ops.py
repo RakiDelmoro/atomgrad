@@ -1,5 +1,27 @@
 import numpy as np
 
+def add(x1: np.ndarray | int, x2: np.ndarray | int): return x1 + x2
+
+def sub(x1: np.ndarray | int, x2: np.ndarray | int): return x1 - x2
+
+def mul(x1: np.ndarray | int, x2: np.ndarray | int): return x1 * x2
+
+def div(x1: np.ndarray | int, x2: np.ndarray | int): return x1 * x2**-1
+
+def matmul(x1: np.ndarray, x2: np.ndarray):
+    # Check num dim
+    x1_shape = x1.shape
+    x2_shape = x2.shape
+
+    # Check dimensions
+    is_x1_3d = len(x1_shape) == 3
+    is_x2_3d = len(x2_shape) == 3
+
+    if is_x1_3d or is_x2_3d:
+        return matmul_3d(x1, x2)
+
+    return np.matmul(x1, x2)
+
 def matmul_3d(x1: np.ndarray, x2: np.ndarray):
     # Check num dim
     x1_shape = x1.shape
@@ -46,16 +68,10 @@ def matmul_3d(x1: np.ndarray, x2: np.ndarray):
 
     return result_data
 
-def matmul(x1: np.ndarray, x2: np.ndarray):
-    # Check num dim
-    x1_shape = x1.shape
-    x2_shape = x2.shape
+def mean_arrays(x: list, axis=0):
+    x = np.stack(x, axis=0)
+    return np.mean(x, axis)
 
-    # Check dimensions
-    is_x1_3d = len(x1_shape) == 3
-    is_x2_3d = len(x2_shape) == 3
-
-    if is_x1_3d or is_x2_3d:
-        return matmul_3d(x1, x2)
-
-    return np.matmul(x1, x2)
+def sum_arrays(x: list, axis=0):
+    x = np.stack(x, axis=0)
+    return np.sum(x, axis)
