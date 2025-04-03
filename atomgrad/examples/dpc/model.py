@@ -1,9 +1,14 @@
 import random
-from features import GREEN, RED, RESET
 import numpy as np
 import torch.nn as nn
 import atomgrad.atom as atom
+import atomgrad.activations_fn.atom_activations as act
 import atomgrad.examples.dpc.optimizer as opt
+
+# Colors
+RED = '\033[31m'
+RESET = '\033[0m'
+GREEN = '\033[32m'
 
 def lower_network_forward(input_data, parameters):
     activation = atom.matmul(input_data, parameters)
@@ -19,7 +24,7 @@ def rnn_forward(input_data, hidden_state, parameters):
 
     input_to_hidden_activation = atom.add(atom.matmul(input_data, input_to_hidden_params[0]), input_to_hidden_params[1])
     hidden_to_hidden_activation = atom.add(atom.matmul(hidden_state, hidden_to_hidden_params[0]), hidden_to_hidden_params[1])
-    output = atom.relu(atom.add(input_to_hidden_activation, hidden_to_hidden_activation), requires_grad=True)
+    output = act.relu()(atom.add(input_to_hidden_activation, hidden_to_hidden_activation))
     return output
 
 def hyper_network_forward(input_data, parameters):
@@ -29,7 +34,7 @@ def hyper_network_forward(input_data, parameters):
         weights = parameters[each][0]
         bias = parameters[each][1]
         pre_activation = atom.add(atom.matmul(activation, weights), bias)
-        activation = pre_activation if last_layer else atom.relu(pre_activation, requires_grad=True)
+        activation = pre_activation if last_layer else act.relu()(pre_activation)
     return activation
 
 def combine_transitions_weights(weights, Vk_parameters):
@@ -37,11 +42,11 @@ def combine_transitions_weights(weights, Vk_parameters):
     return atom.sum_tensors(combined_transitions)
 
 def lower_net_state_update(lower_net_state, value):
-    activation = atom.matmul_3d(value, lower_net_state)
+    activation = atom.matmul(value, lower_net_state)
     noise = 0.01 * np.random.randn(*lower_net_state['shape'])
     atom_noise = atom.tensor(noise)
     updated_lower_net_state = atom.add(activation, atom_noise)
-    return atom.relu(updated_lower_net_state, requires_grad=True)
+    return act.relu()(updated_lower_net_state)
 
 def classifier_forward(input_data, parameters):
     weights = parameters[0]
@@ -101,12 +106,13 @@ def dynamic_predictive_coding(torch_model):
 
             return {'prediction': model_digit_prediction, 'prediction_frame_error': prediction_error}
 
+    # Handle this
     def cross_entropy_loss(prediction, expected):
         def log_softmax(prediction):
             shifted = prediction['data'] - np.max(prediction['data'], axis=-1, keepdims=True)
             return shifted - np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
-
-        prediction_probs = atom.softmax(prediction)
+        # if function used is from atom it always have a type of dict we need the data of that tensor
+        prediction_probs = act.softmax()(prediction)['data']
         grad = (prediction_probs - expected.numpy())
         avg_loss = -np.mean(np.sum(expected.numpy() * log_softmax(prediction), axis=-1))
 
@@ -156,7 +162,7 @@ def dynamic_predictive_coding(torch_model):
 
     return training_phase, testing_phase
 
-
+#Create a file and a function to computional graph for cleaning (Important for resolving memory problem)
 def deepwalk(nodes):
     """Build topological order starting from the given node."""
     visited = set()
@@ -180,7 +186,6 @@ def deepwalk(nodes):
 # After forward pass throw away all the compution graph for memory efficiency
 def cleaner(atom_tensor):
     """Clean compution graph"""
-
     topo = deepwalk(atom_tensor)
     for node in reversed(topo):
         if type(node) == list:
