@@ -7,12 +7,13 @@ import atomgrad.activations_fn.atom_activations as act_ops
 from features import GREEN, RED, RESET
 
 def mlp():
-    linear_1, w1, b1 = nn_ops.linear_layer(784, 2000)
+    parameters = [] 
+    linear_1, params_1 = nn_ops.linear_layer(784, 2000)
     activation = act_ops.relu()
-    linear_2, w2, b2 = nn_ops.linear_layer(2000, 10)
+    linear_2, params_2 = nn_ops.linear_layer(2000, 10)
 
-    #TODO: Create a function that automatically get the parameters of the network
-    parameters = [w1, b1, w2, b2]
+    parameters.extend(params_1)
+    parameters.extend(params_2)
 
     def forward(data):
         linear_1_out = linear_1(data)
