@@ -18,7 +18,7 @@ def matmul(x1: np.ndarray, x2: np.ndarray):
     is_x2_3d = len(x2_shape) == 3
 
     if is_x1_3d or is_x2_3d:
-        return matmul_3d(x1, x2)
+        return matmul_3d(x1, x2.T)
 
     return np.matmul(x1, x2)
 
