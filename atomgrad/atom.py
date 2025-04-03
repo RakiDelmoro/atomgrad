@@ -84,17 +84,41 @@ def matmul(x1, x2):
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
-        if x1['requires_grad']:
-            x1['grad'] += ((grad @ x2['data'])) 
-        if x2['requires_grad']:
-            x2['grad'] += (grad.T @ x1['data']) 
+        x1_shape = x1['shape']
+        x2_shape = x2['shape']
+
+        x1_is_3d = x1['data'].ndim == 3
+        x2_is_3d = x2['data'].ndim == 3
+
+        if not x1_is_3d and not x2_is_3d:
+            if x1['requires_grad']: x1['grad'] += ((grad @ x2['data'])) 
+            if x2['requires_grad']: x2['grad'] += (grad.T @ x1['data']) 
+        else:
+            if x1_is_3d and not x2_is_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
+                if x1['requires_grad']:
+                    for i in range(x1_shape[0]): x1['grad'][i] += np.outer(grad[i], x2['data'][i])
+                if x2['requires_grad']:
+                    for i in range(x2_shape[0]): x2['grad'][i] += np.matmul(grad[i], x1['data'][i])
+            else:
+                if x1['requires_grad']: 
+                    if not x1_is_3d: x1['grad'] += grad @ x2['data']
+                    else:
+                        for i in range(x1_shape[0]): x1['grad'][i] += grad[i][:, np.newaxis] @ x2['data'][i][np.newaxis, :]
+
+                if x2['requires_grad']:
+                    if not x2_is_3d: x2['grad'] += grad.T @ x1['data']
+                    else:
+                        for i in range(x2_shape[0]): x2['grad'][i] += x1['data'][i].T @ grad[i]
+
     result['grad_fn'] = grad_fn
 
     return result
 
 #TODO: Run test for this
-def sum_tensors(x, axis=0):
-    list_atom_data = [atom_tensor['data'] for atom_tensor in x]
+def sum_tensors(x: list | dict, axis=0):
+    if type(x) == list: list_atom_data = [atom_tensor['data'] for atom_tensor in x]
+    else: list_atom_data = [atom_tensor for atom_tensor in x['data']]
+
     result = tensor(ops.sum_arrays(list_atom_data, axis), requires_grad=True)
     result['depends_on'] = [x]
 
@@ -106,7 +130,10 @@ def sum_tensors(x, axis=0):
     return result
 
 #TODO: Run test for this
-def mean_tensor(x, axis=0):
+def mean_tensor(x: list | dict, axis=0):
+    if type(x) == list: list_atom_data = [atom_tensor['data'] for atom_tensor in x]
+    else: list_atom_data = [atom_tensor for atom_tensor in x['data']]
+
     list_atom_data = [atom_tensor['data'] for atom_tensor in x]
     result = tensor(ops.mean_arrays(list_atom_data, axis), requires_grad=True)
     result['depends_on'] = [i for i in x]
