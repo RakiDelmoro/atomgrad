@@ -2,7 +2,7 @@ import random
 import numpy as np
 import atomgrad.atom as atom
 import atomgrad.nn_ops as nn_ops
-import atomgrad.optimizer as opt
+import atomgrad.optimizer as optimizer
 import atomgrad.activations_fn.atom_activations as act_ops
 from features import GREEN, RED, RESET
 
@@ -37,14 +37,15 @@ def mlp():
 
     def training_phase(dataloader):
         each_batch_loss = []
+        step, zero_grad = optimizer.sgd(parameters, lr=0.1)
         for input_batched, label_batched in dataloader:
             input_batched = atom.tensor(input_batched, requires_grad=True)
             model_prediction = forward(input_batched)
             avg_loss, gradients = cross_entropy_loss(model_prediction, label_batched)
             
-            opt.zero_grad(parameters)
+            zero_grad(parameters)
             atom.backward(model_prediction, gradients)
-            opt.step(input_batched['data'].shape[0], parameters)
+            step(input_batched['data'].shape[0])
             print(avg_loss)
             each_batch_loss.append(avg_loss)
 
