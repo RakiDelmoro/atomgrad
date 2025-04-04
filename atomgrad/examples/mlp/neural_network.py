@@ -41,7 +41,7 @@ def mlp():
 
     def training_phase(dataloader):
         each_batch_loss = []
-        step, zero_grad = optimizer.sgd(parameters, lr=0.1)
+        step, zero_grad = optimizer.adam(parameters, lr=0.001)
         for input_batched, label_batched in dataloader:
             input_batched = atom.tensor(input_batched, requires_grad=True)
             model_prediction = forward(input_batched)
