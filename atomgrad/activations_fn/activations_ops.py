@@ -18,6 +18,10 @@ def softmax_ops(atom_tensor):
 
     return softmax_data
 
+def log_softmax(atom_tensor):
+    shifted = atom_tensor['data'] - np.max(atom_tensor['data'], axis=-1, keepdims=True)
+    return shifted - np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
+
 def relu_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 

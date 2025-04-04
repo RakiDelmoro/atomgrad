@@ -19,3 +19,8 @@ def tanh():
     def forward(atom_tensor): return act.tanh_ops(atom_tensor)
 
     return forward
+
+def log_softmax():
+    def forward(atom_tensor): return act.log_softmax(atom_tensor)
+
+    return forward
