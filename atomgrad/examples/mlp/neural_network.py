@@ -4,7 +4,11 @@ import atomgrad.atom as atom
 import atomgrad.nn_ops as nn_ops
 import atomgrad.optimizer as optimizer
 import atomgrad.activations_fn.atom_activations as act_ops
-from features import GREEN, RED, RESET
+
+# Colors
+RED = '\033[31m'
+RESET = '\033[0m'
+GREEN = '\033[32m'
 
 def mlp():
     parameters = [] 
