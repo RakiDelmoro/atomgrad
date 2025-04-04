@@ -4,12 +4,32 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
         {
             "name": "Test file 🪰",
             "type": "debugpy",
             "request": "launch",
             "program": "./atomgrad/test.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "DPC 🪰",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./dpc_runner.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "MLP 🪰",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./image_classification.py",
             "console": "integratedTerminal"
         }
     ]
