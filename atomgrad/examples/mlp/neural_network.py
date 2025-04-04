@@ -28,14 +28,11 @@ def mlp():
     
     def cross_entropy_loss(prediction, expected):
         act_probabilities = act_ops.softmax()
-
-        def log_softmax(prediction):
-            shifted = prediction['data'] - np.max(prediction['data'], axis=-1, keepdims=True)
-            return shifted - np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
+        log_softmax_act = act_ops.log_softmax()
 
         prediction_probs = act_probabilities(prediction)
         grad = (prediction_probs['data'] - expected.numpy())
-        avg_loss = -np.mean(np.sum(expected.numpy() * log_softmax(prediction), axis=-1))
+        avg_loss = -np.mean(np.sum(expected.numpy() * log_softmax_act(prediction), axis=-1))
 
         return avg_loss, grad
 
