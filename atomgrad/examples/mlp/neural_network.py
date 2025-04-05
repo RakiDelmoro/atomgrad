@@ -3,6 +3,7 @@ import numpy as np
 import atomgrad.atom as atom
 import atomgrad.nn_ops as nn_ops
 import atomgrad.optimizer as optimizer
+import atomgrad.loss_fn.atom_loss_fn as loss_ops
 import atomgrad.activations_fn.atom_activations as act_ops
 
 # Colors
@@ -19,22 +20,14 @@ def mlp():
     parameters.extend(params_1)
     parameters.extend(params_2)
 
+    loss_fn = loss_ops.cross_entropy_loss()
+
     def forward(data):
         linear_1_out = linear_1(data)
         neuron_activation = activation(linear_1_out)
         linear_2_out = linear_2(neuron_activation)
 
         return linear_2_out
-    
-    def cross_entropy_loss(prediction, expected):
-        act_probabilities = act_ops.softmax()
-        log_softmax_act = act_ops.log_softmax()
-
-        prediction_probs = act_probabilities(prediction)
-        grad = (prediction_probs['data'] - expected.numpy())
-        avg_loss = -np.mean(np.sum(expected.numpy() * log_softmax_act(prediction), axis=-1))
-
-        return avg_loss, grad
 
     def training_phase(dataloader):
         each_batch_loss = []
@@ -42,8 +35,8 @@ def mlp():
         for input_batched, label_batched in dataloader:
             input_batched = atom.tensor(input_batched, requires_grad=True)
             model_prediction = forward(input_batched)
-            avg_loss, gradients = cross_entropy_loss(model_prediction, label_batched)
-            
+            avg_loss, gradients = loss_fn(model_prediction, label_batched)
+
             zero_grad(parameters)
             atom.backward(model_prediction, gradients)
             step(input_batched['data'].shape[0])
@@ -51,7 +44,7 @@ def mlp():
             each_batch_loss.append(avg_loss)
 
         return np.mean(np.array(each_batch_loss))
-    
+
     def testing_phase(dataloader):
         accuracy = []
         correctness = []
