@@ -43,8 +43,6 @@ def step(batch_size, parameters: dict, lr=0.001, beta1=0.9, beta2=0.999, epsilon
 
         param['data'] -= lr * (m_hat / (np.sqrt(v_hat) + epsilon) + 0.01 * param['data']) 
 
-        # Fix the optimizer it causes the loss to be Nan when using Adam optimizer but when SGD is not getting Nan
-
 def zero_grad(parameters):
     # Collect all trainable parameters from the parameters dictionary
     trainable_params = []
