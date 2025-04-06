@@ -174,13 +174,12 @@ def deepwalk(nodes):
             visited.add(node_identity)
             if type(node) == list:
                 for each in node:
-                    for depends_on in each['depends_on']:
-                        visit(depends_on)
+                    for depends_on in each['depends_on']: visit(depends_on)
             else:
-                for depends_on in node['depends_on']:
-                    visit(depends_on)
+                for depends_on in node['depends_on']: visit(depends_on)
             topo.append(node)
     visit(nodes)
+
     return topo
 
 # After forward pass throw away all the compution graph for memory efficiency
