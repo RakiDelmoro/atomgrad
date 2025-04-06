@@ -10,7 +10,7 @@ def tensor(data, requires_grad=False):
 def add(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    result = tensor(ops.add(x1['data'], x2['data']), requires_grad)
+    result = tensor(ops._add(x1['data'], x2['data']), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
@@ -32,7 +32,7 @@ def add(x1, x2):
 def sub(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    return tensor(ops.sub(x1['data'], x2['data']), requires_grad)
+    return tensor(ops._sub(x1['data'], x2['data']), requires_grad)
 
 # TODO: Transfer the operation in ops.py file
 def broadcasted_mul(x1, x2):
@@ -62,9 +62,12 @@ def broadcasted_mul(x1, x2):
 
     return result
 
+def broadcasted_mul(x1, x2):
+    pass
+
 def mul(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
-    result = tensor(ops.mul(x1['data'], x2['data']), requires_grad)
+    result = tensor(ops._mul(x1['data'], x2['data']), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
@@ -80,7 +83,7 @@ def mul(x1, x2):
 def matmul(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    result = tensor(ops.matmul(x1['data'], x2['data'].T), requires_grad)
+    result = tensor(ops._matmul(x1['data'], x2['data'].T), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
@@ -114,12 +117,11 @@ def matmul(x1, x2):
 
     return result
 
-#TODO: Run test for this
 def sum_tensors(x: list | dict, axis=0):
     if type(x) == list: list_atom_data = [atom_tensor['data'] for atom_tensor in x]
     else: list_atom_data = [atom_tensor for atom_tensor in x['data']]
 
-    result = tensor(ops.sum_arrays(list_atom_data, axis), requires_grad=True)
+    result = tensor(ops._sum_arrays(list_atom_data, axis), requires_grad=True)
     result['depends_on'] = [x]
 
     def grad_fn(grad):
@@ -129,13 +131,12 @@ def sum_tensors(x: list | dict, axis=0):
     result['grad_fn'] = grad_fn
     return result
 
-#TODO: Run test for this
 def mean_tensor(x: list | dict, axis=0):
     if type(x) == list: list_atom_data = [atom_tensor['data'] for atom_tensor in x]
     else: list_atom_data = [atom_tensor for atom_tensor in x['data']]
 
     list_atom_data = [atom_tensor['data'] for atom_tensor in x]
-    result = tensor(ops.mean_arrays(list_atom_data, axis), requires_grad=True)
+    result = tensor(ops._mean_arrays(list_atom_data, axis), requires_grad=True)
     result['depends_on'] = [i for i in x]
 
     def grad_fn(grad):
