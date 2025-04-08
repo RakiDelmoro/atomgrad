@@ -6,8 +6,8 @@ import atomgrad.parameters_init as init
 
 '''NN ops contains the operations for Neural Network this include the forward and backward'''
 
-def linear_layer(input_size, output_size, bias=True):
-    parameters = init.atom_kaiming_init(input_size, output_size)
+def linear_layer(input_size, output_size, bias=True, device='cpu'):
+    parameters = init.atom_kaiming_init(input_size, output_size, device)
 
     def forward(data):
         result = atom.matmul(data, parameters[0])
