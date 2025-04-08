@@ -1,16 +1,18 @@
+import cupy
 import numpy as np
-import atomgrad.atom as atom
+import atomgrad.tensor as atom
 
 '''Activation ops consist of forward pass and backward pass calculation'''
 
 def softmax_ops(atom_tensor):
+    device = atom_tensor['device']
     requires_grad = atom_tensor['requires_grad']
 
-    shifted_data = atom_tensor['data'] - np.max(atom_tensor['data'], axis=-1, keepdims=True)
-    exp_data = np.exp(shifted_data)
-    sum_exp_data = np.sum(exp_data, axis=-1, keepdims=True)
+    shifted_data = atom_tensor['data'] - np.max(atom_tensor['data'], axis=-1, keepdims=True) if device == 'cpu' else atom_tensor['data'] - cupy.max(atom_tensor['data'], axis=-1, keepdims=True)
+    exp_data = np.exp(shifted_data) if device == 'cpu' else cupy.exp(shifted_data)
+    sum_exp_data = np.sum(exp_data, axis=-1, keepdims=True) if device == 'cpu' else cupy.sum(exp_data, axis=-1, keepdims=True)
 
-    softmax_data = atom.tensor(exp_data / sum_exp_data, requires_grad=requires_grad)
+    softmax_data = atom.tensor(exp_data / sum_exp_data, requires_grad=requires_grad, device=device)
         
     # TODO: Figure out the backward fn of softmax
     def backward(grad):
@@ -19,22 +21,25 @@ def softmax_ops(atom_tensor):
     return softmax_data
 
 def log_softmax(atom_tensor):
-    shifted = atom_tensor['data'] - np.max(atom_tensor['data'], axis=-1, keepdims=True)
-    return shifted - np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
+    device = atom_tensor['device']
+
+    shifted = atom_tensor['data'] - np.max(atom_tensor['data'], axis=-1, keepdims=True) if device == 'cpu' else atom_tensor['data'] - cupy.max(atom_tensor['data'], axis=-1, keepdims=True)
+    return shifted - np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True)) if device == 'cpu' else shifted - cupy.log(cupy.sum(cupy.exp(shifted), axis=-1, keepdims=True))
 
 def relu_ops(atom_tensor):
+    device = atom_tensor['device']
     requires_grad = atom_tensor['requires_grad']
 
-    relu_data = atom.tensor(np.maximum(0, atom_tensor['data']), requires_grad=requires_grad)
+    relu_data = atom.tensor(np.maximum(0, atom_tensor['data']), requires_grad=requires_grad, device=device) if device == 'cpu' else atom.tensor(cupy.maximum(0, atom_tensor['data']), requires_grad=requires_grad, device=device)
     relu_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
         if requires_grad:
             if atom_tensor['grad'].ndim == grad.ndim:
                 # Derivative of ReLU applied with chain rule
-                atom_tensor['grad'] = np.where(relu_data['data'] > 0, 1, 0) * grad
+                atom_tensor['grad'] = np.where(relu_data['data'] > 0, 1, 0) * grad if device == 'cpu' else cupy.where(relu_data['data'] > 0, 1, 0) * grad
             else:
-                atom_tensor['grad'] = np.where(relu_data['data'] > 0, 1, 0) * np.sum(grad, axis=-1)
+                atom_tensor['grad'] = np.where(relu_data['data'] > 0, 1, 0) * np.sum(grad, axis=-1) if device == 'cpu' else cupy.where(relu_data['data'] > 0, 1, 0) * np.sum(grad, axis=-1)
 
     relu_data['grad_fn'] = backward
 
