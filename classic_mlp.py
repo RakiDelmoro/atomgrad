@@ -1,4 +1,3 @@
-import gzip
 import pickle
 from dataset.utils import image_data_batching
 from atomgrad.examples.mlp.neural_network import mlp
@@ -8,7 +7,7 @@ def main_runner():
     IMAGE_HEIGHT = 28
     IMAGE_WIDTH = 28
 
-    with gzip.open('./dataset/mnist.pkl.gz', 'rb') as f: ((train_images, train_labels), (test_images, test_labels), _) = pickle.load(f, encoding='latin1')
+    with open('./dataset/mnist.pkl.gz', 'rb') as f: ((train_images, train_labels), (test_images, test_labels), _) = pickle.load(f, encoding='latin1')
     assert train_images.shape[0] == train_labels.shape[0]
     assert test_images.shape[0] == test_labels.shape[0]
     assert train_images.shape[1] == test_images.shape[1] == IMAGE_HEIGHT*IMAGE_WIDTH
