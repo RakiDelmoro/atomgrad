@@ -1,4 +1,4 @@
-import ops
+import atomgrad.cpu.ops as ops
 import torch
 import numpy as np
 

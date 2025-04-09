@@ -1,13 +1,13 @@
 '''Collection of Neural Network operations'''
 import math
 import torch
-import atomgrad.atom as atom
-import atomgrad.parameters_init as init
+import atomgrad.cpu.atom as atom
+import atomgrad.cpu.params_init as init
 
 '''NN ops contains the operations for Neural Network this include the forward and backward'''
 
-def linear_layer(input_size, output_size, bias=True, device='cpu'):
-    parameters = init.atom_kaiming_init(input_size, output_size, device)
+def linear_layer(input_size, output_size, bias=True):
+    parameters = init.atom_kaiming_init(input_size, output_size)
 
     def forward(data):
         result = atom.matmul(data, parameters[0])

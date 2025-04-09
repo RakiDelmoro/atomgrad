@@ -1,4 +1,4 @@
-import atomgrad.loss_fn.losses_ops as loss
+import atomgrad.cpu.loss_fn.loss_fn_ops as loss
 
 def cross_entropy_loss():
     def forward(prediction, expected):

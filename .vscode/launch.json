@@ -29,7 +29,7 @@
             "name": "MLP 🪰",
             "type": "debugpy",
             "request": "launch",
-            "program": "./image_classification.py",
+            "program": "./classic_mlp.py",
             "console": "integratedTerminal"
         }
     ]

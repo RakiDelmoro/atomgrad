@@ -1,6 +1,6 @@
 import math
 import numpy as np
-import init as atom_init
+import atomgrad.cpu.init as atom_init
 import torch
 from torch.nn import init
 from torch.nn.init import kaiming_uniform_

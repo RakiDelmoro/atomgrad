@@ -2,7 +2,7 @@ import torch
 import random
 import torch.nn as nn
 import torch.nn.functional as F
-import atomgrad.atom as atom
+import atomgrad.cpu.atom as atom
 from features import RED, GREEN, RESET
 
 class DPC(nn.Module):

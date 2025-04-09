@@ -1,8 +1,8 @@
 import random
 import numpy as np
 import torch.nn as nn
-import atomgrad.atom as atom
-import atomgrad.activations_fn.atom_activations as act
+import atomgrad.cpu.atom as atom
+import atomgrad.activations_fn.cpu_atom_activations as act
 import atomgrad.examples.dpc.optimizer as opt
 
 # Colors

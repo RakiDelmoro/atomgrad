@@ -1,4 +1,4 @@
-import atomgrad.activations_fn.activations_ops as act
+import atomgrad.cpu.activations_fn.activations_ops as act
 
 def relu():
     def forward(atom_tensor): return act.relu_ops(atom_tensor)

@@ -1,14 +1,16 @@
-import cupy
 import numpy as np
-import atomgrad.ops as ops
-import atomgrad.tensor as tensor
+import atomgrad.cpu.ops as ops
+
+def tensor(data, requires_grad=False):
+    """Create a tensor with data and gradient tracking."""
+    return {'data': np.array(data, dtype=np.float32), 'shape': np.array(data).shape, 'grad': np.zeros_like(data) if requires_grad else None, 'requires_grad': requires_grad, 'grad_fn': None, 'depends_on': []}
 
 '''TENSOR OPS'''
+
 def add(x1, x2):
-    device = x1['device']
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    result = tensor.atom(ops._add(x1, x2), requires_grad, device)
+    result = tensor(ops._add(x1['data'], x2['data']), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
@@ -16,53 +18,21 @@ def add(x1, x2):
             if x1['grad'].ndim == grad.ndim:
                 x1['grad'] += grad
             else:
-                if x1['device'] == 'cpu':
-                    x1['grad'] += np.sum(grad, axis=0)
-                else:
-                    x1['grad'] += cupy.sum(grad, axis=0)
-
+                x1['grad'] += np.sum(grad, axis=0)
         if x2['requires_grad']:
             if x2['grad'].ndim == grad.ndim:
                 x2['grad'] += grad
             else:
-                if x1['device'] == 'cpu':
-                    x1['grad'] += np.sum(grad, axis=0)
-                else:
-                    x1['grad'] += cupy.sum(grad, axis=0)
+                x2['grad'] += np.sum(grad, axis=0)
 
     result['grad_fn'] = grad_fn
 
     return result
 
 def sub(x1, x2):
-    x1 = tensor.atom(x1)
-    x2 = tensor.atom(x2)
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    result = tensor.atom(ops._sub(x1, x2))
-    result['depends_on'] = [x1, x2]
-
-    def grad_fn(grad):
-        if x1['requires_grad']:
-            if x1['grad'].ndim == grad.ndim:
-                x1['grad'] += grad
-            else:
-                if x1['device'] == 'cpu':
-                    x1['grad'] += np.sum(grad, axis=0)
-                else:
-                    x1['grad'] += cupy.sum(grad, axis=0)
-
-        if x2['requires_grad']:
-            if x2['grad'].ndim == grad.ndim:
-                x2['grad'] += grad
-            else:
-                if x1['device'] == 'cpu':
-                    x1['grad'] += np.sum(grad, axis=0)
-                else:
-                    x1['grad'] += cupy.sum(grad, axis=0)
-
-    result['grad_fn'] = grad_fn
-
-    return result
+    return tensor(ops._sub(x1['data'], x2['data']), requires_grad)
 
 # TODO: Transfer the operation in ops.py file
 def broadcasted_mul(x1, x2):
@@ -96,11 +66,8 @@ def broadcasted_mul(x1, x2):
     pass
 
 def mul(x1, x2):
-    x1 = tensor.atom(x1)
-    x2 = tensor.atom(x2)
-    device = x1['device']
-
-    result = tensor.atom(ops._mul(x1, x2))
+    requires_grad = x1['requires_grad'] or x2['requires_grad']
+    result = tensor(ops._mul(x1['data'], x2['data']), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
@@ -114,10 +81,9 @@ def mul(x1, x2):
     return result
 
 def matmul(x1, x2):
-    device = x1['device']
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    result = tensor.atom(ops._matmul(x1, x2), requires_grad, device)
+    result = tensor(ops._matmul(x1['data'], x2['data'].T), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
@@ -128,26 +94,24 @@ def matmul(x1, x2):
         x2_is_3d = x2['data'].ndim == 3
 
         if not x1_is_3d and not x2_is_3d:
-            if x1['requires_grad']: x1['grad'] += np.matmul(grad, x2['data']) if device == 'cpu' else cupy.matmul(grad, x2['data'])
-            if x2['requires_grad']: x2['grad'] += np.matmul(grad.T, x1['data']) if device == 'cpu' else cupy.matmul(grad.T, x1['data'])
+            if x1['requires_grad']: x1['grad'] += ((grad @ x2['data'])) 
+            if x2['requires_grad']: x2['grad'] += (grad.T @ x1['data']) 
         else:
             if x1_is_3d and not x2_is_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
                 if x1['requires_grad']:
-                    for i in range(x1_shape[0]): x1['grad'][i] += np.outer(grad[i], x2['data'][i]) if device == 'cpu' else cupy.outer(grad[i], x2['data'][i])
+                    for i in range(x1_shape[0]): x1['grad'][i] += np.outer(grad[i], x2['data'][i])
                 if x2['requires_grad']:
-                    for i in range(x2_shape[0]): x2['grad'][i] += np.matmul(grad[i], x1['data'][i]) if device == 'cpu' else cupy.matmul(grad[i], x1['data'][i])
+                    for i in range(x2_shape[0]): x2['grad'][i] += np.matmul(grad[i], x1['data'][i])
             else:
                 if x1['requires_grad']: 
-                    if not x1_is_3d: x1['grad'] += np.matmul(grad, x2['data']) if device == 'cpu' else cupy.matmul(grad, x2['data'])
+                    if not x1_is_3d: x1['grad'] += grad @ x2['data']
                     else:
-                        for i in range(x1_shape[0]):
-                            if device == 'cpu': x1['grad'][i] += grad[i][:, np.newaxis] @ x2['data'][i][np.newaxis, :]
-                            else: x1['grad'][i] += grad[i][:, cupy.newaxis] @ x2['data'][i][cupy.newaxis, :]
+                        for i in range(x1_shape[0]): x1['grad'][i] += grad[i][:, np.newaxis] @ x2['data'][i][np.newaxis, :]
 
                 if x2['requires_grad']:
-                    if not x2_is_3d: x2['grad'] += np.matmul(grad.T, x1['data']) if device == 'cpu' else cupy.matmul(grad.T, x1['data'])
+                    if not x2_is_3d: x2['grad'] += grad.T @ x1['data']
                     else:
-                        for i in range(x2_shape[0]): x2['grad'][i] += np.matmul(x1['data'][i].T, grad[i]) if device == 'cpu' else cupy.matmul(x1['data'][i].T, grad[i])
+                        for i in range(x2_shape[0]): x2['grad'][i] += x1['data'][i].T @ grad[i]
 
     result['grad_fn'] = grad_fn
 

@@ -1,5 +1,4 @@
 import numpy as np
-import cupy as cp
 
 def sgd(parameters: list, lr=0.001):
     def step(batch_size):
@@ -18,7 +17,7 @@ def sgd(parameters: list, lr=0.001):
 
     return step, zero_grad
 
-def adam(parameters: list, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, device='cpu'):
+def adam(parameters: list, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
     def step(batch_size):
         # Initialize timestep counter for bias correction
         if not hasattr(step, 't'):
@@ -34,16 +33,10 @@ def adam(parameters: list, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, devic
             grad = param['grad'] / batch_size
 
             # Initialize first and second moment estimates if not present
-            if device == 'cpu':
-                if 'm' not in param:
-                    param['m'] = np.zeros_like(param['data'])
-                if 'v' not in param:
-                    param['v'] = np.zeros_like(param['data'])
-            else:
-                if 'm' not in param:
-                    param['m'] = cp.zeros_like(param['data'])
-                if 'v' not in param:
-                    param['v'] = cp.zeros_like(param['data'])
+            if 'm' not in param:
+                param['m'] = np.zeros_like(param['data'])
+            if 'v' not in param:
+                param['v'] = np.zeros_like(param['data'])
 
             # Update moments with current gradients
             param['m'] = beta1 * param['m'] + (1 - beta1) * grad
@@ -53,13 +46,12 @@ def adam(parameters: list, lr=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8, devic
             m_hat = param['m'] / (1 - beta1 ** step.t)
             v_hat = param['v'] / (1 - beta2 ** step.t)
 
-            param['data'] -= lr * (m_hat / (np.sqrt(v_hat) + epsilon))
-    
+            param['data'] -= lr * (m_hat / (np.sqrt(v_hat) + epsilon)) 
+
     def zero_grad(parameters: list):
         for param in parameters:
             if param['grad'] is None: continue
-            if device == 'cpu': param['grad'] = np.zeros_like(param['grad'], dtype=np.float32)
-            else: param['grad'] = cp.zeros_like(param['grad'], dtype=cp.float32)
+            param['grad'] = np.zeros_like(param['grad'], dtype=np.float32)
 
     return step, zero_grad
 

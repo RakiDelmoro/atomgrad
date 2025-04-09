@@ -1,11 +1,13 @@
 import random
 import numpy as np
-import atomgrad.atom as a
-import atomgrad.nn_ops as nn_ops
-import atomgrad.optimizer as optimizer
-import atomgrad.loss_fn.atom_loss_fn as loss_ops
-import atomgrad.activations_fn.atom_activations as act_ops
-from atomgrad.tensor import atom
+# ATOM for CPU
+import atomgrad.cpu.atom as atom
+import atomgrad.cpu.nn_ops as nn_ops
+import atomgrad.cpu.optimizer as optimizer
+import atomgrad.cpu.loss_fn.loss_fn_nn as loss_ops
+import atomgrad.cpu.activations_fn.activations as act_ops
+# ATOM for GPU
+
 
 # Colors
 RED = '\033[31m'
@@ -14,9 +16,9 @@ GREEN = '\033[32m'
 
 def mlp():
     parameters = [] 
-    linear_1, params_1 = nn_ops.linear_layer(784, 2000, device='cuda')
+    linear_1, params_1 = nn_ops.linear_layer(784, 2000)
     activation = act_ops.relu()
-    linear_2, params_2 = nn_ops.linear_layer(2000, 10, device='cuda')
+    linear_2, params_2 = nn_ops.linear_layer(2000, 10)
 
     parameters.extend(params_1)
     parameters.extend(params_2)
@@ -32,15 +34,17 @@ def mlp():
 
     def training_phase(dataloader):
         each_batch_loss = []
-        step, zero_grad = optimizer.adam(parameters, lr=0.001, device='cuda')
+        step, zero_grad = optimizer.adam(parameters, lr=0.001)
         for input_batched, label_batched in dataloader:
-            input_batched = atom(input_batched, requires_grad=True, device='cuda')
+            input_batched = atom.tensor(input_batched, requires_grad=True)
             model_prediction = forward(input_batched)
             avg_loss, gradients = loss_fn(model_prediction, label_batched)
-
+            print(avg_loss)
+            
             zero_grad(parameters)
-            a.backward(model_prediction, gradients)
+            atom.backward(model_prediction, gradients)
             step(input_batched['data'].shape[0])
+            
             each_batch_loss.append(avg_loss.item())
 
         return np.mean(np.array(each_batch_loss))
@@ -50,8 +54,8 @@ def mlp():
         correctness = []
         wrongness = []
         for i, (batched_image, batched_label) in enumerate(dataloader):
-            batched_image = atom(batched_image, requires_grad=True, device='cuda')
-            batched_label = atom(batched_label.numpy(), device='cuda')
+            batched_image = atom.tensor(batched_image, requires_grad=True)
+            batched_label = atom.tensor(batched_label.numpy())
 
             model_pred_probabilities = act_ops.softmax()(forward(batched_image))['data']
             batch_accuracy = (model_pred_probabilities.argmax(axis=-1) == batched_label['data'].argmax(axis=-1)).mean()

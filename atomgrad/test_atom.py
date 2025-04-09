@@ -1,5 +1,5 @@
 import tensor as atom
-import atom as atom_ops
+import atomgrad.cpu.atom as atom_ops
 
 # Colors
 RED = '\033[31m'
