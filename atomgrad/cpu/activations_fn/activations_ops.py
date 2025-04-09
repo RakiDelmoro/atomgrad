@@ -1,5 +1,5 @@
 import numpy as np
-import atomgrad.cpu.atom as atom
+import atomgrad.cpu.atom as cpu_atom
 
 '''Activation ops consist of forward pass and backward pass calculation'''
 
@@ -10,7 +10,7 @@ def softmax_ops(atom_tensor):
     exp_data = np.exp(shifted_data)
     sum_exp_data = np.sum(exp_data, axis=-1, keepdims=True)
 
-    softmax_data = atom.tensor(exp_data / sum_exp_data, requires_grad=requires_grad)
+    softmax_data = cpu_atom.cpu_tensor(exp_data / sum_exp_data, requires_grad=requires_grad)
         
     # TODO: Figure out the backward fn of softmax
     def backward(grad):
@@ -25,7 +25,7 @@ def log_softmax(atom_tensor):
 def relu_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 
-    relu_data = atom.tensor(np.maximum(0, atom_tensor['data']), requires_grad=requires_grad)
+    relu_data = cpu_atom.cpu_tensor(np.maximum(0, atom_tensor['data']), requires_grad=requires_grad)
     relu_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
@@ -43,7 +43,7 @@ def relu_ops(atom_tensor):
 def leaky_relu_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 
-    leaky_data = atom.tensor(np.maximum(atom_tensor['data'] * 0.05, atom_tensor['data']), requires_grad=requires_grad)
+    leaky_data = cpu_atom.cpu_tensor(np.maximum(atom_tensor['data'] * 0.05, atom_tensor['data']), requires_grad=requires_grad)
     leaky_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
@@ -61,7 +61,7 @@ def leaky_relu_ops(atom_tensor):
 def tanh_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 
-    tanh_data = atom.tensor(np.exp(atom_tensor['data']) - np.exp(-atom_tensor['data']))/(np.exp(atom_tensor['data']) + np.exp(-atom_tensor['data']))
+    tanh_data = cpu_atom.cpu_tensor(np.exp(atom_tensor['data']) - np.exp(-atom_tensor['data']))/(np.exp(atom_tensor['data']) + np.exp(-atom_tensor['data']))
     tanh_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
