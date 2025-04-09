@@ -6,7 +6,7 @@ def text_label_one_hot(label_arr):
     one_hot_expected[np.arange(len(label_arr)), label_arr] = 1
     return torch.tensor(one_hot_expected)
 
-def image_data_batching(img_arr, label_arr, batch_size, shuffle):
+def mnist_dataloader(img_arr, label_arr, batch_size, shuffle):
     num_train_samples = img_arr.shape[0]    
     # Total samples
     train_indices = np.arange(num_train_samples)
