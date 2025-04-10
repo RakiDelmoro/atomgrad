@@ -30,14 +30,14 @@ def deriv_softmax():
     a_calculated_grad = a_logits['grad']
 
     # for double checking
-    # print(t_calculated_grad)
-    # print(a_calculated_grad)
+    print(t_probs)
+    print(a_probs['data'])
 
     satisfied = torch.allclose(torch.tensor(a_calculated_grad), t_calculated_grad)
 
     if satisfied:
         print(f"softmax derivative --->>> {GREEN}PASSED{RESET}")
     else:
-        print(f"softmax derivative --->>> {RED}PASSED{RESET}")
+        print(f"softmax derivative --->>> {RED}FAILED{RESET}")
 
 deriv_softmax()
