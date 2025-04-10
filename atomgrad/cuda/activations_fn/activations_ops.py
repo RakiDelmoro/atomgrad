@@ -1,5 +1,6 @@
 import cupy as cp
-import atomgrad.cuda.atom as atom
+# import atomgrad.cuda.atom as atom
+import atom as atom
 
 '''Activation ops consist of forward pass and backward pass calculation'''
 
@@ -14,7 +15,16 @@ def softmax_ops(atom_tensor):
         
     # TODO: Figure out the backward fn of softmax
     def backward(grad):
-        pass
+        if requires_grad:
+            if atom_tensor['grad'].ndim == grad.ndim:
+                sum_term = (softmax_data['data'] * grad).sum(axis=-1, keepdims=True)
+                atom_tensor['grad'] = softmax_data['data'] * (grad - sum_term)
+            else:
+                grad = cp.sum(grad, axis=-1)
+                sum_term = (softmax_data['data'] * grad).sum(axis=-1, keepdims=True)
+                atom_tensor['grad'] = softmax_data['data'] * (grad - sum_term)
+
+    softmax_data['grad_fn'] = backward
 
     return softmax_data
 
