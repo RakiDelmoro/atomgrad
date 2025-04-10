@@ -12,8 +12,7 @@ def softmax_ops(atom_tensor):
     sum_exp_data = cp.sum(exp_data, axis=-1, keepdims=True)
 
     softmax_data = atom.cuda_tensor(exp_data / sum_exp_data, requires_grad=requires_grad)
-        
-    # TODO: Figure out the backward fn of softmax
+
     def backward(grad):
         if requires_grad:
             if atom_tensor['grad'].ndim == grad.ndim:
