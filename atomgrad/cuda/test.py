@@ -1,5 +1,7 @@
 import atom
 import torch
+import cupy as cp
+import nn_ops as ops
 import activations_fn.activations as act
 
 # Colors
@@ -40,4 +42,27 @@ def deriv_softmax():
     else:
         print(f"softmax derivative --->>> {RED}FAILED{RESET}")
 
-deriv_softmax()
+def test_layer_norm():
+    # Init
+    t_tensor = torch.randn(2, 5)
+    a_tensor = atom.cuda_tensor(t_tensor.numpy())
+
+    a_layer_norm = ops.layer_norm(5)[0]
+    t_layer_norm = torch.nn.LayerNorm(5)
+
+    a_res = a_layer_norm(a_tensor)
+    t_res = t_layer_norm(t_tensor)
+
+    satisfied = torch.allclose(torch.tensor(a_res['data']), t_res)
+
+    if satisfied:
+        print(f"layer norm --->>> {GREEN}PASSED{RESET}")
+    else:
+        print(f"layer norm --->>> {RED}FAILED{RESET}")
+
+def deriv_3d_matmul():
+    pass
+
+# deriv_softmax()
+# test_dropout()
+test_layer_norm()
