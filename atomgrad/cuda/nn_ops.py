@@ -43,12 +43,10 @@ def layer_norm(normalized_shape, eps=1e-5):
     learnable_parameters.extend([bias])
 
     def forward(atom_tensor):
-        mean = atom_tensor['data'].mean(axis=-1, keepdims=True)
-        std = atom_tensor['data'].std(axis=-1, keepdims=True)
+        x_normalized = atom.layer_norm_(atom_tensor, eps)
+        apply_layer_norm = atom.add(atom.mul(weight, x_normalized), bias)
 
-        x_normalized = atom.cuda_tensor((atom_tensor['data'] - mean) / (std + eps))
-
-        return atom.add(atom.mul(weight, x_normalized), bias)
+        return apply_layer_norm
 
     return forward, learnable_parameters
 
@@ -59,16 +57,24 @@ def embeddings(num_embeddings, embedding_dim):
         if cp.any(indices['data'] < 0) or cp.any(indices['data'] >= num_embeddings):
             raise ValueError("Indices out of range [0, num_embeddings-1]")
 
-        return atom.cuda_tensor(parameters['data'][indices['data'].astype(int)], True)
+        result = atom.cuda_tensor(parameters['data'][indices['data'].astype(int)], True)
+        result['depends_on'] = parameters
+
+        return result
 
     return forward, parameters
 
-def linear_layer(input_size, output_size, bias=True):
+def linear_layer(input_size, output_size, bias=True, dropout_p=0, train=True):
     learnable_parameters = init.atom_kaiming_init(input_size, output_size)
-
+    
     def forward(data):
         result = atom.matmul(data, learnable_parameters[0])
-        if bias: result = atom.add(result, learnable_parameters[1])
+        if bias:
+            result = atom.add(result, learnable_parameters[1])
+            if dropout_p > 0:
+                # Apply dropout if applicable
+                dropped_out = dropout(dropout_p, train)(result)
+                return dropped_out
 
         return result
 
@@ -81,9 +87,9 @@ def attention_layer(head_size, embedding_dim):
     key, key_params = linear_layer(embedding_dim, head_size)
     value, value_params = linear_layer(embedding_dim, head_size)
 
-    learnable_parameters.extend([query_params])
-    learnable_parameters.extend([key_params])
-    learnable_parameters.extend([value_params])
+    learnable_parameters.extend(query_params)
+    learnable_parameters.extend(key_params)
+    learnable_parameters.extend(value_params)
 
     def forward(data):
         query_projection = query(data)
@@ -107,13 +113,17 @@ def multi_head_attention_layer(num_heads, head_size, embedding_dim):
     attention_heads = [attention_layer(head_size, embedding_dim) for _ in range(num_heads)]
     out_projection, params = linear_layer(head_size * num_heads, embedding_dim)
 
-    learnable_parameters.extend([attn_head_params for _, attn_head_params in attention_heads])
-    learnable_parameters.extend([params])
+    for _, attn_params in attention_heads:
+        learnable_parameters.extend(attn_params)
+
+    # learnable_parameters.extend(attn_head_params for _, attn_head_params in attention_heads)
+    learnable_parameters.extend(params)
 
     def forward(data):
-        out = atom.cuda_tensor(cp.concatenate([attn_head(data)['data'] for attn_head, _ in attention_heads], axis=-1), requires_grad=True)
+        attention_heads_outputs = [attn_head(data) for attn_head, _ in attention_heads]
+        concatenated_attn_heads = atom.concatenate(attention_heads_outputs, axis=-1)
 
-        return out_projection(out)
+        return out_projection(concatenated_attn_heads)
     
     return forward, learnable_parameters
 
@@ -126,8 +136,8 @@ def transformer_block(num_attn_heads, embedding_dim):
     # FeedForward
     linear_1, linear_1_params = linear_layer(embedding_dim, embedding_dim * 4)
     activation_fn = atom_act.relu()
-    linear_2, linear_2_params = linear_layer(embedding_dim * 4, embedding_dim)
-    ff_dropout = dropout(p=0.5)
+    # linear2 dropout activativated
+    linear_2, linear_2_params = linear_layer(embedding_dim * 4, embedding_dim, dropout_p=0.5)
 
     layer_norm1, layer_norm1_params = layer_norm(embedding_dim)
     layer_norm2, layer_norm2_params = layer_norm(embedding_dim)
@@ -146,7 +156,7 @@ def transformer_block(num_attn_heads, embedding_dim):
         # FeedForward acts
         linear_1_out = linear_1(layer_norm2(mha_output))
         activation_out = activation_fn(linear_1_out)
-        linear_2_out = ff_dropout(linear_2(activation_out))
+        linear_2_out = linear_2(activation_out)
         
         # Residual Connection
         out = atom.add(mha_output, linear_2_out)
