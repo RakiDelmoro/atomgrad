@@ -1,6 +1,9 @@
 import cupy as cp
 import atomgrad.cuda.ops as ops
 
+#NOTE: uncomment this when running test.py in this directory
+# import ops as ops
+
 def cuda_tensor(data, requires_grad=False):
     """Create a tensor with data and gradient tracking."""
     return {'data': cp.array(data, dtype=cp.float32), 'shape': cp.array(data).shape, 'grad': cp.zeros_like(data) if requires_grad else None, 'requires_grad': requires_grad, 'grad_fn': None, 'depends_on': []}
@@ -23,7 +26,50 @@ def add(x1, x2):
             if x2['grad'].ndim == grad.ndim:
                 x2['grad'] += grad
             else:
-                x2['grad'] += cp.sum(grad, axis=0)
+                x2['grad'] += cp.sum(cp.sum(grad, axis=0), axis=0)
+
+    result['grad_fn'] = grad_fn
+
+    return result
+
+def dropout_(atom_tensor, prob, train):
+    requires_grad = atom_tensor['requires_grad']
+
+    if train and prob != 0:
+        if prob == 1:
+            result = cuda_tensor(cp.zeros_like(atom_tensor['data']), requires_grad=requires_grad)
+
+        bool_mask = cp.random.rand(*atom_tensor['shape']) > prob
+        res = bool_mask * atom_tensor['data'] * (float(1.0 / (1.0 - prob)))
+        result =  cuda_tensor(res, requires_grad=requires_grad)
+    else:
+        result = atom_tensor
+
+    result['depends_on'] = [atom_tensor]
+
+    def grad_fn(grad): atom_tensor['grad'] = grad
+
+    result['grad_fn'] = grad_fn
+
+    return result
+
+def layer_norm_(atom_tensor, eps):
+    mean = atom_tensor['data'].mean(axis=-1, keepdims=True)
+    std = atom_tensor['data'].std(axis=-1, keepdims=True)
+
+    centered = (atom_tensor['data'] - mean)
+    denominator = (std + eps)
+
+    result = cuda_tensor((centered / denominator), requires_grad=atom_tensor['requires_grad'])
+    # print(result)
+    result['depends_on'] = [atom_tensor]
+
+    def grad_fn(grad):
+        mean_grad = grad.mean(axis=-1, keepdims=True)
+        sum_grad_centered = (grad * centered).sum(axis=-1, keepdims=True)
+        term1 = (grad - mean_grad) / denominator
+        term2 = centered * sum_grad_centered / (result['data'].shape[-1] * std * denominator**2)
+        atom_tensor['grad'] = term1 - term2
 
     result['grad_fn'] = grad_fn
 
@@ -62,9 +108,6 @@ def broadcasted_mul(x1, x2):
 
     return result
 
-def broadcasted_mul(x1, x2):
-    pass
-
 def mul(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
     result = cuda_tensor(ops._mul(x1['data'], x2['data']), requires_grad)
@@ -73,7 +116,9 @@ def mul(x1, x2):
     def grad_fn(grad):
         """Backward function for multiplication."""
         if x1['requires_grad']:
-            x1['grad'] += grad * x2['data']
+            if x1['grad'].ndim == 1:
+                x1['grad'] += cp.sum(cp.sum(grad * x2['data'], axis=0), axis=0)
+
         if x2['requires_grad']:
             x2['grad'] += grad * x1['data']
     result['grad_fn'] = grad_fn
@@ -106,10 +151,13 @@ def matmul(x1, x2):
                 if x1['requires_grad']: 
                     if not x1_is_3d: x1['grad'] += grad @ x2['data']
                     else:
-                        for i in range(x1_shape[0]): x1['grad'][i] += grad[i][:, cp.newaxis] @ x2['data'][i][cp.newaxis, :]
+                        if x2['data'].ndim == 2:
+                            for i in range(x1_shape[0]): x1['grad'][i] += cp.matmul(grad[i], x2['data'])
+                        else:
+                            x1['grad'] += cp.matmul(grad, x2['data'].transpose(0, 2, 1))
 
                 if x2['requires_grad']:
-                    if not x2_is_3d: x2['grad'] += grad.T @ x1['data']
+                    if not x2_is_3d: x2['grad'] += cp.sum(cp.matmul(grad.transpose(0, 2, 1), x1['data']), axis=0)
                     else:
                         for i in range(x2_shape[0]): x2['grad'][i] += x1['data'][i].T @ grad[i]
 
@@ -122,11 +170,35 @@ def sum_tensors(x: list | dict, axis=0):
     else: list_atom_data = [atom_tensor for atom_tensor in x['data']]
 
     result = cuda_tensor(ops._sum_arrays(list_atom_data, axis), requires_grad=True)
-    result['depends_on'] = [x]
+    result['depends_on'] = [x] if type(x) == dict else [each for each in x]
 
     def grad_fn(grad):
         for i in range(len(x['data'])):
             x['grad'][i] += grad
+
+    result['grad_fn'] = grad_fn
+    return result
+
+def concatenate(x: list | dict, axis=-1):
+    if type(x) == list: list_atom_data = [atom_tensor['data'] for atom_tensor in x]
+    else: list_atom_data = [atom_tensor for atom_tensor in x['data']]
+
+    # list_atom_data = [atom_tensor['data'] for atom_tensor in x]
+    result = cuda_tensor(cp.concatenate(list_atom_data, axis=axis), requires_grad=x[0]['requires_grad'])
+    result['depends_on'] = [x] if type(x) == dict else [each for each in x]
+
+    def grad_fn(grad):
+        if type(x) == list:
+            start_idx = 0
+            end_idx = x[0]['shape'][-1]
+            for each in x:
+                each['grad'] += grad[:, :, start_idx:end_idx]
+
+                start_idx += each['shape'][-1]
+                end_idx += each['shape'][-1]
+        else:
+            for i in range(len(x['data'])):
+                x['grad'][i] += grad
 
     result['grad_fn'] = grad_fn
     return result
