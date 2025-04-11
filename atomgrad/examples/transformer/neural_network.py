@@ -1,11 +1,15 @@
+import cupy as cp
 import atomgrad.cuda.nn_ops as cuda_ops
+import atomgrad.cuda.atom as cuda_atom
 
-def transformer(num_transformer_blocks=4, vocab_size=10, embedding_dim=128, num_attn_heads=4):
+def transformer(num_transformer_blocks=4, block_size=256, vocab_size=10, embedding_dim=128, num_attn_heads=4):
     learnable_parameters = []
 
-    char_embedding, embeddings_params = cuda_ops.embeddings(num_embeddings=vocab_size, embedding_dim=embedding_dim)
+    char_embedding, char_emb_params = cuda_ops.embeddings(num_embeddings=vocab_size, embedding_dim=embedding_dim)
+    pos_embedding, pos_emb_params = cuda_ops.embeddings(num_embeddings=block_size, embedding_dim=embedding_dim)
 
-    learnable_parameters.extend([embeddings_params])
+    learnable_parameters.extend([char_emb_params])
+    learnable_parameters.extend([pos_emb_params])
 
     transformer_blocks = []
     for _ in range(num_transformer_blocks):
@@ -19,12 +23,17 @@ def transformer(num_transformer_blocks=4, vocab_size=10, embedding_dim=128, num_
     learnable_parameters.extend(layer_norm_params)
     learnable_parameters.extend(classifier_params)
 
-    def forward(data):
-        embeddings = char_embedding(data)
+    def forward(input_data, target=None):
+        B, T = input_data['shape']
+        tok_embeddings = char_embedding(input_data)
+        pos_embeddings = pos_embedding(cuda_atom.cuda_tensor(cp.arange(T), requires_grad=True))
+    
+        embeddings = cuda_atom.add(tok_embeddings, pos_embeddings)
+
         for each in transformer_blocks:
             embeddings = each(embeddings)
 
         out = linear_classifier(layer_norm(embeddings))
-        return out, embeddings
+        return out
 
     return forward, learnable_parameters
