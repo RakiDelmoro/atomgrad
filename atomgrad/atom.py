@@ -1,7 +1,5 @@
 import numpy as np
 import cupy as cp
-import atomgrad.cpu.ops as cpu_ops
-import atomgrad.cuda.ops as cuda_ops
 
 def tensor(data, requires_grad=False, device='cpu'):
     """Create a tensor with data and gradient tracking."""
@@ -32,6 +30,8 @@ def build_topo(nodes):
                         visit(depends_on)
             else:
                 for depends_on in node['depends_on']:
+                    if type(depends_on) == str:
+                        continue
                     visit(depends_on)
             topo.append(node)
     visit(nodes)
