@@ -6,7 +6,7 @@ import atomgrad.cuda.optimizer as cuda_opt
 import atomgrad.cuda.loss_fn.loss_fn_nn as loss_fn
 from atomgrad.examples.transformer.neural_network import transformer
 
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 BLOCK_SIZE = 256
 MAX_EPOCHS = 5000
 LEARNING_RATE = 3e-4
@@ -43,7 +43,7 @@ def test_runner():
     train_data = data[:split]
     test_data = data[split:]
 
-    model, parameters = transformer(embedding_dim=vocab_size, vocab_size=vocab_size, num_transformer_blocks=4)
+    model, parameters = transformer(embedding_dim=EMBEDDING_DIM, vocab_size=vocab_size, num_transformer_blocks=6, num_attn_heads=6)
     loss_func = loss_fn.cross_entropy_loss()
     adam_step, adam_zero_grad = cuda_opt.adam(parameters)
 
@@ -61,14 +61,13 @@ def test_runner():
     atom.backward(model_pred, grad)
     adam_step(train_batched[0]['shape'][0])
 
-    print(parameters[2]['grad'])
+    print(parameters[5]['grad'])
 
     print(loss)
 
         # print(loss)
 
-    #TODO: first 6 parameters have zero gradient suggest there's a bug in backward pass
-    # FIX embedding backward pass
+    #TODO: FIgure out why the gradient is not properly propagated in multi head attention layer
     #TODO: Implement the attention mask in atomgrad
 
 test_runner()
