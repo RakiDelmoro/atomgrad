@@ -1,8 +1,8 @@
 import cupy as cp
-import atomgrad.cuda.ops as ops
+# import atomgrad.cuda.ops as ops
 
 #NOTE: uncomment this when running test.py in this directory
-# import ops as ops
+import ops as ops
 
 def cuda_tensor(data, requires_grad=False):
     """Create a tensor with data and gradient tracking."""
@@ -11,6 +11,9 @@ def cuda_tensor(data, requires_grad=False):
 '''TENSOR OPS'''
 
 def add(x1, x2):
+    x1_shape = x1['shape']
+    x2_shape = x2['shape']
+
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
     result = cuda_tensor(ops._add(x1['data'], x2['data']), requires_grad)
@@ -23,10 +26,13 @@ def add(x1, x2):
             else:
                 x1['grad'] += cp.sum(grad, axis=0)
         if x2['requires_grad']:
-            if x2['grad'].ndim == grad.ndim:
+            if x2['grad'].ndim == grad.ndim:                
                 x2['grad'] += grad
             else:
-                x2['grad'] += cp.sum(cp.sum(grad, axis=0), axis=0)
+                if x2['grad'].ndim == 2:
+                    x2['grad'] += grad.sum(axis=0)
+                elif x2['grad'].ndim == 1:
+                    x2['grad'] += cp.sum(cp.sum(grad, axis=0), axis=0)
 
     result['grad_fn'] = grad_fn
 
@@ -217,3 +223,38 @@ def mean_tensor(x: list | dict, axis=0):
 
     result['grad_fn'] = grad_fn
     return result
+
+def embeddings_(x, parameters):
+    x_shape = x['shape']
+    num_embeddings = parameters['shape'][0]
+    requires_grad = parameters['requires_grad']
+
+    if cp.any(x['data'] < 0) or cp.any(x['data'] >= num_embeddings):
+        raise ValueError("Indices out of range [0, num_embeddings-1]")
+    
+    result = cuda_tensor(parameters['data'][x['data'].astype(int)], requires_grad)
+    result['depends_on'] = [parameters]
+
+    def grad_fn(grad):
+        if x['data'].ndim == 2:
+            indices = x['data'].astype(int).reshape(-1)
+        else:
+            indices = x['data'].astype(int)
+
+        one_hot = cp.eye(num_embeddings, dtype=grad.dtype)[indices]
+
+        if grad.ndim > 2:
+            grad_reshaped = grad.reshape(-1, grad.shape[-1])
+            summed_grad = cp.matmul(one_hot.T, grad_reshaped)
+            parameters['grad'] += summed_grad
+
+        else:
+            parameters['grad'] += grad
+
+        # Compute summed gradient for embedding parameters
+        
+        
+
+    result['grad_fn'] = grad_fn
+    return result
+
