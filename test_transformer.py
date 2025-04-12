@@ -43,28 +43,32 @@ def test_runner():
     train_data = data[:split]
     test_data = data[split:]
 
-    model, parameters = transformer(embedding_dim=EMBEDDING_DIM, vocab_size=vocab_size, num_transformer_blocks=4)
+    model, parameters = transformer(embedding_dim=vocab_size, vocab_size=vocab_size, num_transformer_blocks=4)
     loss_func = loss_fn.cross_entropy_loss()
     adam_step, adam_zero_grad = cuda_opt.adam(parameters)
 
-    for _ in range(MAX_EPOCHS):
-        train_batched = get_batch(train_data)
-        # test_batched = get_batch(test_data)
-        model_pred = model(train_batched[0])
+    train_batched = get_batch(train_data)
+    # test_batched = get_batch(test_data)
+    model_pred = model(train_batched[0])
 
-        reshaped_model_pred = model_pred['data'].reshape(BATCH_SIZE*BLOCK_SIZE, vocab_size)
-        model_pred['data'] = reshaped_model_pred
+    reshaped_model_pred = model_pred['data'].reshape(BATCH_SIZE*BLOCK_SIZE, vocab_size)
+    model_pred['data'] = reshaped_model_pred
 
-        loss, grad = loss_func(model_pred, train_batched[1]['data'].reshape(BATCH_SIZE*BLOCK_SIZE))
-        grad = grad.reshape(BATCH_SIZE, BLOCK_SIZE, vocab_size)
+    loss, grad = loss_func(model_pred, train_batched[1]['data'].reshape(BATCH_SIZE*BLOCK_SIZE))
+    grad = grad.reshape(BATCH_SIZE, BLOCK_SIZE, vocab_size)
 
-        adam_zero_grad(parameters)
-        atom.backward(model_pred, grad)
-        adam_step(train_batched[0]['shape'][0])
+    adam_zero_grad(parameters)
+    atom.backward(model_pred, grad)
+    adam_step(train_batched[0]['shape'][0])
 
-        print(loss)
+    print(parameters[2]['grad'])
 
-        #TODO: first 6 parameters have zero gradient suggest there's a bug in backward pass
-        #TODO: Implement the attention mask in atomgrad
+    print(loss)
+
+        # print(loss)
+
+    #TODO: first 6 parameters have zero gradient suggest there's a bug in backward pass
+    # FIX embedding backward pass
+    #TODO: Implement the attention mask in atomgrad
 
 test_runner()
