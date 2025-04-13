@@ -1,6 +1,6 @@
 import cupy as cp
-# import atomgrad.cuda.atom as atom
-import atom as atom
+# import atomgrad.cuda.atom as cuda_atom
+import atom as cuda_atom
 
 '''Activation ops consist of forward pass and backward pass calculation'''
 
@@ -11,7 +11,8 @@ def softmax_ops(atom_tensor):
     exp_data = cp.exp(shifted_data)
     sum_exp_data = cp.sum(exp_data, axis=-1, keepdims=True)
 
-    softmax_data = atom.cuda_tensor(exp_data / sum_exp_data, requires_grad=requires_grad)
+    softmax_data = cuda_atom.cuda_tensor(exp_data / sum_exp_data, requires_grad=requires_grad)
+    softmax_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
         if requires_grad:
@@ -34,7 +35,7 @@ def log_softmax(atom_tensor):
 def relu_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 
-    relu_data = atom.cuda_tensor(cp.maximum(0, atom_tensor['data']), requires_grad=requires_grad)
+    relu_data = cuda_atom.cuda_tensor(cp.maximum(0, atom_tensor['data']), requires_grad=requires_grad)
     relu_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
@@ -52,7 +53,7 @@ def relu_ops(atom_tensor):
 def leaky_relu_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 
-    leaky_data = atom.cuda_tensor(cp.maximum(atom_tensor['data'] * 0.05, atom_tensor['data']), requires_grad=requires_grad)
+    leaky_data = cuda_atom.cuda_tensor(cp.maximum(atom_tensor['data'] * 0.05, atom_tensor['data']), requires_grad=requires_grad)
     leaky_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
@@ -70,7 +71,7 @@ def leaky_relu_ops(atom_tensor):
 def tanh_ops(atom_tensor):
     requires_grad = atom_tensor['requires_grad']
 
-    tanh_data = atom.cuda_tensor(cp.exp(atom_tensor['data']) - cp.exp(-atom_tensor['data']))/(cp.exp(atom_tensor['data']) + cp.exp(-atom_tensor['data']))
+    tanh_data = cuda_atom.cuda_tensor(cp.exp(atom_tensor['data']) - cp.exp(-atom_tensor['data']))/(cp.exp(atom_tensor['data']) + cp.exp(-atom_tensor['data']))
     tanh_data['depends_on'] = [atom_tensor]
 
     def backward(grad):
