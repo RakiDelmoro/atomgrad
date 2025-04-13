@@ -231,7 +231,6 @@ def test_attention():
     torch_grad = torch.randn(2, 5, 16)
     atom_grad = cp.array(torch_grad.numpy())
 
-    torch_dropout = torch.nn.Dropout()
     torch_query_proj = torch.nn.Linear(16, 16)
     torch_key_proj = torch.nn.Linear(16, 16)
     torch_value_proj = torch.nn.Linear(16, 16)
@@ -289,8 +288,10 @@ def test_attention():
     else:
         print(f"Value calculate grad --->>> {RED}FAILED{RESET}")
 
-test_attention()
+def test_dropout():
+    pass
 
+test_attention()
 deriv_softmax()
 # test_layer_norm()
 # test_embedding()
