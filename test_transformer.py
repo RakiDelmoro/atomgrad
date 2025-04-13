@@ -62,12 +62,7 @@ def test_runner():
     adam_step(train_batched[0]['shape'][0])
 
     print(parameters[2]['grad'].shape)
-
     print(loss)
 
-        # print(loss)
-
-    #TODO: FIgure out why the gradient is not properly propagated in multi head attention layer
-    #TODO: Implement the attention mask in atomgrad
 
 test_runner()
