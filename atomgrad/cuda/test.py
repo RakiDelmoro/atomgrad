@@ -220,9 +220,77 @@ def test_embedding():
     else:
         print(f"Pos Embedding backward --->>> {RED}FAILED{RESET}")
 
-def test_pos_embedding():
-    pass
+def test_attention():
+    # Init
+    torch_x = torch.randn(2, 5, 16)
+    atom_x = atom.cuda_tensor(torch_x.numpy(), requires_grad=True)
+    
+    torch_tril = torch.tril(torch.ones((5, 5)))
+    atom_tril = cp.tril(torch.ones(5, 5))
 
-# deriv_softmax()
+    torch_grad = torch.randn(2, 5, 16)
+    atom_grad = cp.array(torch_grad.numpy())
+
+    torch_dropout = torch.nn.Dropout()
+    torch_query_proj = torch.nn.Linear(16, 16)
+    torch_key_proj = torch.nn.Linear(16, 16)
+    torch_value_proj = torch.nn.Linear(16, 16)
+
+    atom_query_proj, atom_query_params = ops.linear_layer(16, 16, [torch_query_proj.weight, torch_query_proj.bias])
+    atom_key_proj, atom_key_params = ops.linear_layer(16, 16, [torch_key_proj.weight, torch_key_proj.bias])
+    atom_value_proj, atom_value_params = ops.linear_layer(16, 16, [torch_value_proj.weight, torch_value_proj.bias])
+
+    # TORCH forward and backward pass
+    # https://github.com/karpathy/ng-video-lecture/blob/master/gpt.py
+    query = torch_query_proj(torch_x)
+    key = torch_key_proj(torch_x)
+    value = torch_value_proj(torch_x)
+
+    qk_projection = query @ key.transpose(-2, -1) * key.shape[-1]**-0.5
+    qk_projection_masked = qk_projection.masked_fill(torch_tril[:5, :5] == 0, float('-inf'))
+    torch_wei = torch.nn.functional.softmax(qk_projection_masked, dim=-1)
+    out = torch_wei @ value
+    out.backward(torch_grad)
+
+    # ATOM forward and backward pass
+    query = atom_query_proj(atom_x)
+    key = atom_key_proj(atom_x)
+    value = atom_value_proj(atom_x)
+    key['data'] = key['data'].transpose(0, 2, 1)
+
+    qk_projection = atom.matmul(query, key)
+    scale = atom.cuda_tensor(key['shape'][-1]**-0.5)
+    scale_projection = atom.mul(qk_projection, scale)
+
+    mask = atom_tril[:5, :5] == 0
+    scale_projection['data'][:, mask] = -cp.inf
+    scale_projection_masked = scale_projection
+
+    attention_scores = act.softmax()(scale_projection_masked)
+    attention_weight = atom.matmul(attention_scores, value)
+    backward(attention_weight, atom_grad)
+
+    query_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_query_params[0]['grad'])), torch_query_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(cp.asnumpy(atom_query_params[1]['grad'])), torch_query_proj.bias.grad, atol=1e-5) 
+    key_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_key_params[0]['grad'])), torch_key_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(cp.asnumpy(atom_key_params[1]['grad'])), torch_key_proj.bias.grad, atol=1e-5) 
+    value_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_value_params[0]['grad'])), torch_value_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(cp.asnumpy(atom_value_params[1]['grad'])), torch_value_proj.bias.grad, atol=1e-5) 
+
+    if query_satisfied:
+        print(f"Query calculate grad --->>> {GREEN}PASSED{RESET}")
+    else:
+        print(f"Query calculate grad --->>> {RED}FAILED{RESET}")
+
+    if key_satisfied:
+        print(f"Key calculate grad --->>> {GREEN}PASSED{RESET}")
+    else:
+        print(f"Key calculate grad --->>> {RED}FAILED{RESET}")
+
+    if value_satisfied:
+        print(f"Value calculate grad --->>> {GREEN}PASSED{RESET}")
+    else:
+        print(f"Value calculate grad --->>> {RED}FAILED{RESET}")
+
+test_attention()
+
+deriv_softmax()
 # test_layer_norm()
-test_embedding()
+# test_embedding()
