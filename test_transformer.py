@@ -61,7 +61,7 @@ def test_runner():
     atom.backward(model_pred, grad)
     adam_step(train_batched[0]['shape'][0])
 
-    print(parameters[5]['grad'])
+    print(parameters[2]['grad'].shape)
 
     print(loss)
 
