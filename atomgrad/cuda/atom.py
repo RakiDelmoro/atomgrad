@@ -1,8 +1,8 @@
 import cupy as cp
-# import atomgrad.cuda.ops as ops
+import atomgrad.cuda.ops as ops
 
 #NOTE: uncomment this when running test.py in this directory
-import ops as ops
+# import ops as ops
 
 def cuda_tensor(data, requires_grad=False):
     """Create a tensor with data and gradient tracking."""
@@ -33,27 +33,6 @@ def add(x1, x2):
                     x2['grad'] += grad.sum(axis=0)
                 elif x2['grad'].ndim == 1:
                     x2['grad'] += cp.sum(cp.sum(grad, axis=0), axis=0)
-
-    result['grad_fn'] = grad_fn
-
-    return result
-
-def dropout_(atom_tensor, prob, train):
-    requires_grad = atom_tensor['requires_grad']
-
-    if train and prob != 0:
-        if prob == 1:
-            result = cuda_tensor(cp.zeros_like(atom_tensor['data']), requires_grad=requires_grad)
-
-        bool_mask = cp.random.rand(*atom_tensor['shape']) > prob
-        res = bool_mask * atom_tensor['data'] * (float(1.0 / (1.0 - prob)))
-        result =  cuda_tensor(res, requires_grad=requires_grad)
-    else:
-        result = atom_tensor
-
-    result['depends_on'] = [atom_tensor]
-
-    def grad_fn(grad): atom_tensor['grad'] = grad
 
     result['grad_fn'] = grad_fn
 
@@ -124,6 +103,9 @@ def mul(x1, x2):
         if x1['requires_grad']:
             if x1['grad'].ndim == 1:
                 x1['grad'] += cp.sum(cp.sum(grad * x2['data'], axis=0), axis=0)
+            
+            if x1['grad'].ndim == grad.ndim:
+                x1['grad'] += grad * x2['data']
 
         if x2['requires_grad']:
             x2['grad'] += grad * x1['data']
@@ -165,8 +147,12 @@ def matmul(x1, x2):
                 if x2['requires_grad']:
                     if not x2_is_3d: x2['grad'] += cp.sum(cp.matmul(grad.transpose(0, 2, 1), x1['data']), axis=0)
                     else:
-                        for i in range(x2_shape[0]): x2['grad'][i] += x1['data'][i].T @ grad[i]
-
+                        if x2['grad'].shape == grad.shape:
+                            for i in range(x2_shape[0]): x2['grad'][i] += x1['data'][i].T @ grad[i]
+                        else:
+                            # x2['grad'] += cp.matmul(grad, x1['data'])
+                            x2['grad'] += cp.matmul(x1['data'].transpose(0, -1, -2), grad).transpose(0, -1, -2)
+                        
     result['grad_fn'] = grad_fn
 
     return result
@@ -246,15 +232,32 @@ def embeddings_(x, parameters):
         if grad.ndim > 2:
             grad_reshaped = grad.reshape(-1, grad.shape[-1])
             summed_grad = cp.matmul(one_hot.T, grad_reshaped)
-            parameters['grad'] += summed_grad
+            parameters['grad'] += summed_grad / num_embeddings
 
         else:
-            parameters['grad'] += grad
-
-        # Compute summed gradient for embedding parameters
-        
-        
+            parameters['grad'] += grad / num_embeddings
 
     result['grad_fn'] = grad_fn
     return result
 
+def dropout_(atom_tensor, p, train=True):
+    requires_grad = atom_tensor['requires_grad']
+
+    if train and p != 0:
+        if p == 1:
+            result = cuda_tensor(cp.zeros_like(atom_tensor['data']), requires_grad=requires_grad)
+        else:
+            bool_mask = cp.random.rand(*atom_tensor['shape']) > p
+            res = bool_mask * atom_tensor['data'] * (float(1.0 / (1.0 - p)))
+            result = cuda_tensor(res, requires_grad=requires_grad)
+    else:
+        result = atom_tensor
+
+    result['depends_on'] = [atom_tensor]
+
+    def grad_fn(grad):
+        if requires_grad:
+            atom_tensor['grad'] += grad
+    
+    result['grad_fn'] = grad_fn
+    return result
