@@ -2,13 +2,13 @@
 import math
 import torch
 import cupy as cp
-# import atomgrad.cuda.atom as cuda_atom
-# import atomgrad.cuda.params_init as init
-# import atomgrad.cuda.activations_fn.activations as atom_act
+import atomgrad.cuda.atom as cuda_atom
+import atomgrad.cuda.params_init as init
+import atomgrad.cuda.activations_fn.activations as atom_act
 
-import atom as cuda_atom
-import params_init as init 
-import activations_fn.activations as atom_act
+# import atom as cuda_atom
+# import params_init as init 
+# import activations_fn.activations as atom_act
 
 '''NN ops contains the operations for Neural Network this include the forward and backward'''
 def recurrent_layer():
@@ -21,15 +21,7 @@ def dropout(p, train=True):
     '''Dropout does not have learnable parameters it's just a regulation that randomly zeros the activation'''
 
     def forward(atom_tensor):
-        if train and p != 0:
-            if p == 1:
-                return cuda_atom.cuda_tensor(cp.zeros_like(atom_tensor['data']), requires_grad=train)
-
-            bool_mask = cp.random.rand(*atom_tensor['shape']) > p
-            res = bool_mask * atom_tensor['data'] * (float(1.0 / (1.0 - p)))
-            return cuda_atom.cuda_tensor(res, requires_grad=train)
-        else:
-            return atom_tensor
+        return cuda_atom.dropout_(atom_tensor, p, train)
 
     return forward
 
@@ -59,19 +51,13 @@ def embeddings(num_embeddings, embedding_dim):
 
     return forward, parameters
 
-def linear_layer(input_size, output_size, parameters, bias=True, dropout_p=0, train=True):
-    # learnable_parameters = init.atom_kaiming_init(input_size, output_size)
-    
-    learnable_parameters = [cuda_atom.cuda_tensor(parameters[0].data.numpy(), requires_grad=True), cuda_atom.cuda_tensor(parameters[1].data.numpy(), requires_grad=True)]
+def linear_layer(input_size, output_size, bias=True):
+    learnable_parameters = init.atom_kaiming_init(input_size, output_size)
 
     def forward(data):
         result = cuda_atom.matmul(data, learnable_parameters[0])
         if bias:
             result = cuda_atom.add(result, learnable_parameters[1])
-            if dropout_p > 0:
-                # Apply dropout if applicable
-                dropped_out = dropout(dropout_p, train)(result)
-                return dropped_out
 
         return result
 
@@ -82,6 +68,7 @@ def attention_layer(head_size, embedding_dim):
     tril = cp.tril(cp.ones((block_size, block_size)))
     learnable_parameters = []
 
+    attn_dropout = dropout(p=0.2)
     query, query_params = linear_layer(embedding_dim, head_size)
     key, key_params = linear_layer(embedding_dim, head_size)
     value, value_params = linear_layer(embedding_dim, head_size)
@@ -108,6 +95,7 @@ def attention_layer(head_size, embedding_dim):
         scale_projection['data'][:, mask] = -cp.inf
 
         attention_scores = softmax_act(scale_projection)
+        attention_scores = attn_dropout(attention_scores)
         attention_weight = cuda_atom.matmul(attention_scores, value_projection)
 
         return attention_weight
@@ -123,14 +111,16 @@ def multi_head_attention_layer(num_heads, head_size, embedding_dim):
         attention_blocks.append(attn_block)
         learnable_parameters.extend(attn_params)
 
-    out_projection, params = linear_layer(head_size * num_heads, embedding_dim, dropout_p=0.2)
+    dropout_proj = dropout(p=0.2)
+    out_projection, params = linear_layer(head_size * num_heads, embedding_dim)
     learnable_parameters.extend(params)
 
     def forward(data):
         attention_heads_outputs = [block(data) for block in attention_blocks]
         concatenated_attn_heads = cuda_atom.concatenate(attention_heads_outputs, axis=-1)
+        out_dropout = dropout_proj(concatenated_attn_heads)
 
-        return out_projection(concatenated_attn_heads)
+        return out_projection(out_dropout)
     
     return forward, learnable_parameters
 
@@ -143,8 +133,8 @@ def transformer_block(num_attn_heads, embedding_dim):
     # FeedForward
     linear_1, linear_1_params = linear_layer(embedding_dim, embedding_dim * 4)
     activation_fn = atom_act.relu()
-    # linear2 dropout activativated
-    linear_2, linear_2_params = linear_layer(embedding_dim * 4, embedding_dim, dropout_p=0.2)
+    linear_2, linear_2_params = linear_layer(embedding_dim * 4, embedding_dim)
+    linear_2_dropout = dropout(p=0.2)
 
     # Gradients is successfully propagte in layernorms parameters
     layer_norm1, layer_norm1_params = layer_norm(embedding_dim)
@@ -166,10 +156,10 @@ def transformer_block(num_attn_heads, embedding_dim):
         linear_1_out = linear_1(layer_norm2(mha_output))
         activation_out = activation_fn(linear_1_out)
         linear_2_out = linear_2(activation_out)
-        
-        # START DEBUG HERE!
+        ff_out = linear_2_dropout(linear_2_out)
+
         # Residual Connection
-        out = cuda_atom.add(mha_output, linear_2_out)
+        out = cuda_atom.add(mha_output, ff_out)
 
         return out
 
