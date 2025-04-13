@@ -30,8 +30,8 @@ def build_topo(nodes):
                         visit(depends_on)
             else:
                 for depends_on in node['depends_on']:
-                    if type(depends_on) == str:
-                        continue
+                    # if type(depends_on) == str:
+                    #     continue
                     visit(depends_on)
             topo.append(node)
     visit(nodes)
@@ -63,3 +63,19 @@ def backward(atom_tensor, grad=None):
             # Throw it away after calculating/propagate the gradient
             node['depends_on'] = []
             node['grad_fn'] = None
+
+def cleaner(atom_tensor):
+    topo = build_topo(atom_tensor)
+
+    for node in reversed(topo):
+        if type(node) == list:
+            for each in node:
+                # Throw it away after calculating/propagate the gradient
+                each['depends_on'] = []
+                each['grad_fn'] = None
+
+        else:
+            # Throw it away after calculating/propagate the gradient
+            node['depends_on'] = []
+            node['grad_fn'] = None
+
