@@ -10,11 +10,12 @@ BATCH_SIZE = 32
 BLOCK_SIZE = 256
 MAX_EPOCHS = 5000
 LEARNING_RATE = 3e-4
-
+EVAL_ITERS = 200
 EMBEDDING_DIM = 384
 NUM_HEAD = 6
 NUM_TRANSFORMER_BLOCK = 6
 DROPOUT = 0.2
+EVAL_ITERVAL = 500
 
 def get_batch(data):
     idx = np.random.randint(len(data) - BLOCK_SIZE, size=(BATCH_SIZE,))
@@ -23,7 +24,25 @@ def get_batch(data):
 
     return cuda_atom.cuda_tensor(context, requires_grad=True), cuda_atom.cuda_tensor(next_context, requires_grad=True)
 
-    return cuda.context, next_context
+def evaluate_iterations(model, train_data, test_data):
+    train_losses = cp.zeros(EVAL_ITERS)
+    test_losses = cp.zeros(EVAL_ITERS)
+
+    for k in range(EVAL_ITERS):
+        x_train, y_train = get_batch(train_data)
+        x_test, y_test = get_batch(test_data)
+
+        train_logits, train_loss, _ = model(x_train, y_train)
+        atom.cleaner(train_logits)
+        test_logits, test_loss, _ = model(x_test, y_test)
+        atom.cleaner(test_logits)
+
+        train_losses[k] = train_loss.item()
+        test_losses[k] = test_loss.item()
+
+        print(f'EVAL: {k}', end='\r', flush=True)
+
+    return cp.mean(train_losses), cp.mean(test_losses)
 
 def test_runner():
     with open('./dataset/shakespeare.txt', 'r', encoding='utf-8') as f: text = f.read()
@@ -45,24 +64,19 @@ def test_runner():
 
     model, parameters = transformer(embedding_dim=EMBEDDING_DIM, vocab_size=vocab_size, num_transformer_blocks=6, num_attn_heads=6)
     loss_func = loss_fn.cross_entropy_loss()
-    adam_step, adam_zero_grad = cuda_opt.adam(parameters)
+    adam_step, adam_zero_grad = cuda_opt.adam_w(parameters, LEARNING_RATE)
 
-    train_batched = get_batch(train_data)
-    # test_batched = get_batch(test_data)
-    model_pred = model(train_batched[0])
+    for epoch in range(MAX_EPOCHS):
+        if epoch % EVAL_ITERVAL == 0 or epoch == MAX_EPOCHS -1:
+            print('EVALUATING>>>')
+            train_loss, test_loss = evaluate_iterations(model, train_data, test_data)
+            print(f"step {iter}: train loss {train_loss:.4f}, val loss {test_loss:.4f}")
 
-    reshaped_model_pred = model_pred['data'].reshape(BATCH_SIZE*BLOCK_SIZE, vocab_size)
-    model_pred['data'] = reshaped_model_pred
+        x_batched, y_batched = get_batch(train_data)
+        model_pred, loss, grad = model(x_batched, y_batched)
 
-    loss, grad = loss_func(model_pred, train_batched[1]['data'].reshape(BATCH_SIZE*BLOCK_SIZE))
-    grad = grad.reshape(BATCH_SIZE, BLOCK_SIZE, vocab_size)
-
-    adam_zero_grad(parameters)
-    atom.backward(model_pred, grad)
-    adam_step(train_batched[0]['shape'][0])
-
-    print(parameters[2]['grad'].shape)
-    print(loss)
-
+        adam_zero_grad(parameters)
+        atom.backward(model_pred, grad)
+        adam_step(x_batched['shape'][0])
 
 test_runner()
