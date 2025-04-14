@@ -232,32 +232,57 @@ def embeddings_(x, parameters):
         if grad.ndim > 2:
             grad_reshaped = grad.reshape(-1, grad.shape[-1])
             summed_grad = cp.matmul(one_hot.T, grad_reshaped)
-            parameters['grad'] += summed_grad / num_embeddings
+            parameters['grad'] += summed_grad
 
         else:
-            parameters['grad'] += grad / num_embeddings
+            parameters['grad'] += grad
 
     result['grad_fn'] = grad_fn
     return result
 
-def dropout_(atom_tensor, p, train=True):
+def dropout_(atom_tensor, prob, train=True):
     requires_grad = atom_tensor['requires_grad']
+    mask = None
+    scale = 1.0  # Default scale when not applying dropout
 
-    if train and p != 0:
-        if p == 1:
-            result = cuda_tensor(cp.zeros_like(atom_tensor['data']), requires_grad=requires_grad)
+    if train and prob != 0:
+        if prob == 1:
+            # Handle p=1 (complete dropout) by creating a zero tensor and a zero mask
+            mask = cp.zeros(atom_tensor['shape'], dtype=cp.bool_)
+            result_data = cp.zeros_like(atom_tensor['data'])
         else:
-            bool_mask = cp.random.rand(*atom_tensor['shape']) > p
-            res = bool_mask * atom_tensor['data'] * (float(1.0 / (1.0 - p)))
-            result = cuda_tensor(res, requires_grad=requires_grad)
+            # Generate dropout mask and compute scaling factor
+            mask = cp.random.rand(*atom_tensor['shape']) > prob
+            scale = 1.0 / (1.0 - prob)
+            result_data = mask * atom_tensor['data'] * scale
+        
+        # Create the result tensor with the computed data
+        result = cuda_tensor(result_data, requires_grad=requires_grad)
     else:
+        # No dropout applied (either eval mode or p=0)
         result = atom_tensor
+        if train and prob == 0:
+            # If p=0, mask is all ones (no dropout)
+            mask = cp.ones(atom_tensor['shape'], dtype=cp.bool_)
 
+    # Set up dependency for autograd
     result['depends_on'] = [atom_tensor]
 
     def grad_fn(grad):
-        if requires_grad:
-            atom_tensor['grad'] += grad
-    
+        if train:
+            if prob == 1:
+                # If all neurons were dropped, gradient is zero
+                atom_grad = cp.zeros_like(atom_tensor['data'])
+            else:
+                # Apply mask and scaling to gradient
+                atom_grad = grad * mask * scale
+        else:
+            # In eval mode, no dropout - pass gradient through
+            atom_grad = grad
+        
+        # Update the input tensor's gradient
+        atom_tensor['grad'] = atom_grad
+
     result['grad_fn'] = grad_fn
+
     return result
