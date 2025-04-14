@@ -169,31 +169,13 @@ def test_embedding():
     torch_emb_char = torch_char_embedding.forward(indices)
     torch_emb_pos = torch_pos_embedding.forward(pos_emb)
     torch_output = torch_emb_char + torch_emb_pos
+    torch_output.retain_grad()
     torch_emb_char.retain_grad()
     torch_emb_pos.retain_grad()
 
     atom_emb_char = atom_char_embedding(atom.cuda_tensor(indices.numpy(), requires_grad=True))
     atom_emb_pos = atom_pos_embedding(atom.cuda_tensor(pos_emb.numpy(), requires_grad=True))
     atom_output = atom.add(atom_emb_char, atom_emb_pos)
-
-    char_emb_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_emb_char['data'])), torch_emb_char, atol=1e-5)
-    pos_emb_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_emb_pos['data'])), torch_emb_pos, atol=1e-5)
-    forward_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_output['data'])), torch_output, atol=1e-5)
-    
-    if forward_satisfied:
-        print(f"Embedding forward --->>> {GREEN}PASSED{RESET}")
-    else:
-        print(f"Embedding forward --->>> {RED}FAILED{RESET}")
-
-    if char_emb_satisfied:
-        print(f"Char Embedding forward --->>> {GREEN}PASSED{RESET}")
-    else:
-        print(f"Char Embedding forward --->>> {RED}FAILED{RESET}")
-
-    if pos_emb_satisfied:
-        print(f"Pos Embedding forward --->>> {GREEN}PASSED{RESET}")
-    else:
-        print(f"Pos Embedding forward --->>> {RED}FAILED{RESET}")
 
     torch_loss = torch_loss_fn(torch_output.view(BATCH*SEQ_LEN, VOCAB_SIZE), expected)
     torch_loss.backward()
@@ -204,40 +186,51 @@ def test_embedding():
     atom_loss, atom_loss_grad = atom_loss_fn(atom_output, atom_expected)
     backward(atom_output, atom_loss_grad.reshape(BATCH, SEQ_LEN, VOCAB_SIZE))
 
+    atom_char_forward = cp.asnumpy(atom_emb_char['data'])
+    atom_pos_forward = cp.asnumpy(atom_emb_pos['data'])
+
+    char_forward_satisfied = torch.allclose(torch.tensor(atom_char_forward), torch_emb_char)
+    pos_forward_satisfied = torch.allclose(torch.tensor(atom_pos_forward), torch_emb_pos)
+
     atom_char_grad = char_parameter['grad'] / (BATCH*SEQ_LEN)
     atom_pos_grad = pos_parameter['grad'] / (BATCH*SEQ_LEN)
 
     char_grad_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_char_grad)), torch_char_embedding.weight.grad)
     pos_grad_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_pos_grad)), torch_pos_embedding.weight.grad)
 
-    if char_grad_satisfied:
-        print(f"Char Embedding backward --->>> {GREEN}PASSED{RESET}")
-    else:
-        print(f"Char Embedding backward --->>> {RED}FAILED{RESET}")
+    if char_grad_satisfied and char_forward_satisfied: print(f"Char Embedding forward and backward --->>> {GREEN}PASSED{RESET}")
+    else: print(f"Char Embedding forward and backward --->>> {RED}FAILED{RESET}")
 
-    if pos_grad_satisfied:
-        print(f"Pos Embedding backward --->>> {GREEN}PASSED{RESET}")
-    else:
-        print(f"Pos Embedding backward --->>> {RED}FAILED{RESET}")
+    if pos_grad_satisfied and pos_forward_satisfied: print(f"Pos Embedding forward and backward --->>> {GREEN}PASSED{RESET}")
+    else: print(f"Pos Embedding forward and backward --->>> {RED}FAILED{RESET}")
 
 def test_attention():
     # Init
-    torch_x = torch.randn(2, 5, 16)
+    BATCH = 2
+    SEQ_LEN = 5
+    FEATURE_SIZE = 16
+
+    torch_x = torch.randn(BATCH, SEQ_LEN, FEATURE_SIZE)
     atom_x = atom.cuda_tensor(torch_x.numpy(), requires_grad=True)
-    
-    torch_tril = torch.tril(torch.ones((5, 5)))
-    atom_tril = cp.tril(torch.ones(5, 5))
+    torch_y = torch.randint(low=0, high=FEATURE_SIZE, size=(BATCH*SEQ_LEN,))
+    atom_y = torch_y.numpy()
 
-    torch_grad = torch.randn(2, 5, 16)
-    atom_grad = cp.array(torch_grad.numpy())
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+    atom_loss_fn = loss_nn.cross_entropy_loss()
 
-    torch_query_proj = torch.nn.Linear(16, 16)
-    torch_key_proj = torch.nn.Linear(16, 16)
-    torch_value_proj = torch.nn.Linear(16, 16)
+    torch_tril = torch.tril(torch.ones((SEQ_LEN, SEQ_LEN)))
+    atom_tril = cp.tril(torch.ones(SEQ_LEN, SEQ_LEN))
 
-    atom_query_proj, atom_query_params = ops.linear_layer(16, 16, [torch_query_proj.weight, torch_query_proj.bias])
-    atom_key_proj, atom_key_params = ops.linear_layer(16, 16, [torch_key_proj.weight, torch_key_proj.bias])
-    atom_value_proj, atom_value_params = ops.linear_layer(16, 16, [torch_value_proj.weight, torch_value_proj.bias])
+    # torch_grad = torch.randn(2, 5, 16)
+    # atom_grad = cp.array(torch_grad.numpy())
+
+    torch_query_proj = torch.nn.Linear(FEATURE_SIZE, FEATURE_SIZE)
+    torch_key_proj = torch.nn.Linear(FEATURE_SIZE, FEATURE_SIZE)
+    torch_value_proj = torch.nn.Linear(FEATURE_SIZE, FEATURE_SIZE)
+
+    atom_query_proj, atom_query_params = ops.linear_layer(FEATURE_SIZE, FEATURE_SIZE, [torch_query_proj.weight, torch_query_proj.bias])
+    atom_key_proj, atom_key_params = ops.linear_layer(FEATURE_SIZE, FEATURE_SIZE, [torch_key_proj.weight, torch_key_proj.bias])
+    atom_value_proj, atom_value_params = ops.linear_layer(FEATURE_SIZE, FEATURE_SIZE, [torch_value_proj.weight, torch_value_proj.bias])
 
     # TORCH forward and backward pass
     # https://github.com/karpathy/ng-video-lecture/blob/master/gpt.py
@@ -246,32 +239,45 @@ def test_attention():
     value = torch_value_proj(torch_x)
 
     qk_projection = query @ key.transpose(-2, -1) * key.shape[-1]**-0.5
-    qk_projection_masked = qk_projection.masked_fill(torch_tril[:5, :5] == 0, float('-inf'))
+    qk_projection_masked = qk_projection.masked_fill(torch_tril[:SEQ_LEN, :SEQ_LEN] == 0, float('-inf'))
     torch_wei = torch.nn.functional.softmax(qk_projection_masked, dim=-1)
-    out = torch_wei @ value
-    out.backward(torch_grad)
+    torch_out = torch_wei @ value
+    torch_loss = torch_loss_fn(torch_out.view(BATCH*SEQ_LEN, FEATURE_SIZE), torch_y)
+    torch_loss.backward()
 
     # ATOM forward and backward pass
     query = atom_query_proj(atom_x)
     key = atom_key_proj(atom_x)
     value = atom_value_proj(atom_x)
-    key['data'] = key['data'].transpose(0, 2, 1)
+    key['data'] = key['data'].transpose(0, BATCH, 1)
 
     qk_projection = atom.matmul(query, key)
     scale = atom.cuda_tensor(key['shape'][-1]**-0.5)
     scale_projection = atom.mul(qk_projection, scale)
 
-    mask = atom_tril[:5, :5] == 0
+    mask = atom_tril[:SEQ_LEN, :SEQ_LEN] == 0
     scale_projection['data'][:, mask] = -cp.inf
     scale_projection_masked = scale_projection
 
     attention_scores = act.softmax()(scale_projection_masked)
-    attention_weight = atom.matmul(attention_scores, value)
-    backward(attention_weight, atom_grad)
+    atom_out = atom.matmul(attention_scores, value)
+    reshaped_atom_out = atom_out['data'].reshape(BATCH*SEQ_LEN, FEATURE_SIZE)
+    atom_out['data'] = reshaped_atom_out
+    atom_loss, atom_grad = atom_loss_fn(atom_out, atom_y)
+    backward(atom_out, atom_grad.reshape(BATCH, SEQ_LEN, FEATURE_SIZE))
 
-    query_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_query_params[0]['grad'])), torch_query_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(cp.asnumpy(atom_query_params[1]['grad'])), torch_query_proj.bias.grad, atol=1e-5) 
-    key_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_key_params[0]['grad'])), torch_key_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(cp.asnumpy(atom_key_params[1]['grad'])), torch_key_proj.bias.grad, atol=1e-5) 
-    value_satisfied = torch.allclose(torch.tensor(cp.asnumpy(atom_value_params[0]['grad'])), torch_value_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(cp.asnumpy(atom_value_params[1]['grad'])), torch_value_proj.bias.grad, atol=1e-5) 
+    atom_query_weight_grad = cp.asnumpy(atom_query_params[0]['grad'] / (BATCH*SEQ_LEN))
+    atom_query_bias_grad = cp.asnumpy(atom_query_params[1]['grad'] / (BATCH*SEQ_LEN))
+    
+    atom_key_weight_grad = cp.asnumpy(atom_key_params[0]['grad'] / (BATCH*SEQ_LEN))
+    atom_key_bias_grad = cp.asnumpy(atom_key_params[1]['grad'] / (BATCH*SEQ_LEN))
+
+    atom_value_weight_grad = cp.asnumpy(atom_value_params[0]['grad'] / (BATCH*SEQ_LEN))
+    atom_value_bias_grad = cp.asnumpy(atom_value_params[1]['grad'] / (BATCH*SEQ_LEN))
+
+    query_satisfied = torch.allclose(torch.tensor(atom_query_weight_grad), torch_query_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(atom_query_bias_grad), torch_query_proj.bias.grad, atol=1e-5) 
+    key_satisfied = torch.allclose(torch.tensor(atom_key_weight_grad), torch_key_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(atom_key_bias_grad), torch_key_proj.bias.grad, atol=1e-5) 
+    value_satisfied = torch.allclose(torch.tensor(atom_value_weight_grad), torch_value_proj.weight.grad, atol=1e-5) and torch.allclose(torch.tensor(atom_value_bias_grad), torch_value_proj.bias.grad, atol=1e-5) 
 
     if query_satisfied:
         print(f"Query calculate grad --->>> {GREEN}PASSED{RESET}")
@@ -288,10 +294,86 @@ def test_attention():
     else:
         print(f"Value calculate grad --->>> {RED}FAILED{RESET}")
 
-def test_dropout():
-    pass
+def test_linear():
+    BATCH = 3
+    SEQ_LEN = 5
+    FEATURE_SIZE = 8
 
-test_attention()
-deriv_softmax()
+    torch_x = torch.randn(BATCH, SEQ_LEN, FEATURE_SIZE)
+    atom_x = atom.cuda_tensor(torch_x.detach().numpy(), requires_grad=True)
+
+    torch_y = torch.randint(low=0, high=5, size=(BATCH, SEQ_LEN))
+    atom_y = cp.array(torch_y.numpy())
+
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+    atom_loss_fn = loss_nn.cross_entropy_loss()
+
+    # TORCH
+    torch_linear = torch.nn.Linear(FEATURE_SIZE, FEATURE_SIZE)
+    # ATOM
+    atom_linear, atom_params = ops.linear_layer(FEATURE_SIZE, FEATURE_SIZE, [torch_linear.weight, torch_linear.bias])
+
+    # TORCH F
+    torch_out = torch_linear(torch_x)
+    torch_out.retain_grad()
+    # TORCH B
+    loss = torch_loss_fn(torch_out.view(BATCH*SEQ_LEN, FEATURE_SIZE), torch_y.view(BATCH*SEQ_LEN))
+    loss.backward()
+
+    # ATOM F
+    atom_out = atom_linear(atom_x)
+    atom_out_reshaped = atom_out['data'].reshape(BATCH*SEQ_LEN, FEATURE_SIZE)
+    atom_out['data'] = atom_out_reshaped
+
+    atom_loss, atom_grad = atom_loss_fn(atom_out, atom_y.reshape(3*SEQ_LEN))
+    # ATOM B
+    backward(atom_out, atom_grad.reshape(BATCH, SEQ_LEN, FEATURE_SIZE))
+
+    atom_weight_grad = cp.asnumpy(atom_params[0]['grad'] / (BATCH*SEQ_LEN))
+    atom_bias_grad = cp.asnumpy(atom_params[1]['grad'] / (BATCH*SEQ_LEN))
+
+    weight_grad_satisfied = torch.allclose(torch.tensor(atom_weight_grad), torch_linear.weight.grad)
+    bias_grad_satisfied = torch.allclose(torch.tensor(atom_bias_grad), torch_linear.bias.grad)
+
+    if weight_grad_satisfied: print(f"Linear weight grad calculation --->>> {GREEN}PASSED{RESET}")
+    else: print(f"Linear weight grad calculation --->>> {RED}FAILED{RESET}")
+
+    if bias_grad_satisfied: print(f"Linear bias grad calculation --->>> {GREEN}PASSED{RESET}")
+    else: print(f"Linear bias grad calculation --->>> {RED}FAILED{RESET}")
+
+    # print(torch_out.grad * 3)
+    # print(atom_out['grad']) 
+
+def test_dropout():
+    # Init 
+    torch_x = torch.randn(2, 5, 6, requires_grad=True)
+    atom_x = atom.cuda_tensor(torch_x.detach().numpy(), requires_grad=True)
+    
+    torch_grad = torch.randn(2, 5, 6)
+    atom_grad = cp.array(torch_grad.numpy())
+
+    torch_dropout = torch.nn.Dropout(p=0.1)
+    atom_dropout = ops.dropout(p=0.1)
+
+    torch_out = torch_dropout(torch_x)
+    torch_x.retain_grad()
+    torch_out.retain_grad()
+    atom_out = atom_dropout(atom_x)
+
+    torch_out.backward(torch_grad)
+    backward(atom_out, atom_grad)
+
+    # Double Check
+    print(torch_x.grad[0])
+    print((atom_x['grad'] / (2*5))[0])  
+
+test_dropout()
+# test_linear()
+# test_attention()
+# deriv_softmax()
 # test_layer_norm()
 # test_embedding()
+
+
+# UPON Testing
+# I Figure out that if the x data feed in are multi dimensional (BATCH, SEQ, FEATURE) the gradient scaling are divide by BATCH*SEQ
