@@ -54,7 +54,8 @@ def layer_norm_(atom_tensor, eps):
         sum_grad_centered = (grad * centered).sum(axis=-1, keepdims=True)
         term1 = (grad - mean_grad) / denominator
         term2 = centered * sum_grad_centered / (result['data'].shape[-1] * std * denominator**2)
-        atom_tensor['grad'] = term1 - term2
+        # STUPIDD! += instead of =
+        atom_tensor['grad'] += term1 - term2
 
     result['grad_fn'] = grad_fn
 
@@ -280,8 +281,7 @@ def dropout_(atom_tensor, prob, train=True):
             # In eval mode, no dropout - pass gradient through
             atom_grad = grad
         
-        # Update the input tensor's gradient
-        atom_tensor['grad'] = atom_grad
+        atom_tensor['grad'] += atom_grad
 
     result['grad_fn'] = grad_fn
 
