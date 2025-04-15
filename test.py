@@ -6,6 +6,8 @@ import atomgrad.cuda.loss_fn.loss_fn_nn as loss_nn
 import atomgrad.torch_examples.transformer.neural_network as torch_transformer
 import atomgrad.examples.transformer.neural_network as atom_transformer
 
+import atomgrad.cuda.nn_ops as nn_ops
+
 BATCH = 2
 VOCAB_SIZE = 10
 SEQ_LEN = 3
@@ -176,6 +178,8 @@ def compare_multi_head_attn(atom_grad=None, torch_grad=None):
     head_2_key_satisfied = torch.allclose(attn_head_2_key_grad, torch_model.heads[1].key.weight.grad.cpu(), atol=1e-5)
     head_2_value_satisfied = torch.allclose(attn_head_2_value_grad, torch_model.heads[1].value.weight.grad.cpu(), atol=1e-5)
 
+    print(linear_proj_satisfied)
+
     print(f'{UNDERLINE}Attn head 1 query satisfied{RESET}: {GREEN}{head_1_query_satisfied}{RESET}')
     print(f'{UNDERLINE}Attn head 1 key satisfied{RESET}: {GREEN}{head_1_key_satisfied}{RESET}')
     print(f'{UNDERLINE}Attn head 1 value satisfied{RESET}: {GREEN}{head_1_value_satisfied}{RESET}')
@@ -233,22 +237,58 @@ def compare_mlp(atom_grad=None, torch_grad=None):
     # print(torch_model.ff_linear_1.weight.grad)
     # print(atom_params[2]['grad'][0])
 
-def compare_transformer_block():
-    pass
+def compare_transformer_block(atom_grad=None, torch_grad=None):
+    '''Test with 2 attention heads with 2 transformer blocks'''
 
-def compare_model():
-    pass
+    if atom_grad is None and torch_grad is None:
+        torch_grad = torch.randn(BATCH, SEQ_LEN, VOCAB_SIZE, device='cuda')
+        atom_grad = cupy.array(torch_grad.cpu().numpy())
 
-print()
-compare_embeddings()
-print()
-# compare_attention()
-# print()
-compare_multi_head_attn()
-print()
-compare_mlp()
-print()
+    torch_x = torch.randn(BATCH, SEQ_LEN, VOCAB_SIZE, device='cuda')
+    atom_x = cuda_atom.cuda_tensor(torch_x.detach().cpu().numpy(), requires_grad=True)
 
+    torch_model = torch_transformer.TransformerBlocks(VOCAB_SIZE, NUM_HEAD)
+
+    '''Transformer Block 1'''
+    block_1_input_layer_norm = [torch_model.blocks[0].ln1.weight.detach().cpu(), torch_model.blocks[0].ln1.bias.detach().cpu()]
+    # Attention heads
+    block_1_attn_heads = torch_model.blocks[0].attention_layer.heads
+    # Attn proj out params
+    block_1_attn_proj_out_params = [torch_model.blocks[0].attention_layer.proj.weight.detach().cpu(), torch_model.blocks[0].attention_layer.proj.bias.detach().cpu()]
+    # FeedForward params
+    block_1_ff_layer_norm = [torch_model.blocks[0].feedforward.ff_layer_norm.weight.detach().cpu(), torch_model.blocks[0].feedforward.ff_layer_norm.bias.detach().cpu()]
+    block_1_ff_lin_1_params = [torch_model.blocks[0].feedforward.ff_linear_1.weight.detach().cpu(), torch_model.blocks[0].feedforward.ff_linear_1.bias.detach().cpu()]
+    block_1_ff_lin_2_params = [torch_model.blocks[0].feedforward.ff_linear_2.weight.detach().cpu(), torch_model.blocks[0].feedforward.ff_linear_2.bias.detach().cpu()]
+
+    '''Transformer Block 2'''
+    block_2_input_layer_norm = [torch_model.blocks[1].ln1.weight.detach().cpu(), torch_model.blocks[1].ln1.bias.detach().cpu()]
+    # Attention heads
+    block_2_attn_heads = torch_model.blocks[1].attention_layer.heads
+    # Attn proj out params
+    block_2_attn_proj_out_params = [torch_model.blocks[1].attention_layer.proj.weight.detach().cpu(), torch_model.blocks[1].attention_layer.proj.bias.detach().cpu()]
+    # FeedForward params
+    block_2_ff_layer_norm = [torch_model.blocks[1].feedforward.ff_layer_norm.weight.detach().cpu(), torch_model.blocks[1].feedforward.ff_layer_norm.bias.detach().cpu()]
+    block_2_ff_lin_1_params = [torch_model.blocks[1].feedforward.ff_linear_1.weight.detach().cpu(), torch_model.blocks[1].feedforward.ff_linear_1.bias.detach().cpu()]
+    block_2_ff_lin_2_params = [torch_model.blocks[1].feedforward.ff_linear_2.weight.detach().cpu(), torch_model.blocks[1].feedforward.ff_linear_2.bias.detach().cpu()]
+
+    atom_model, atom_params = atom_transformer.transformer_blocks(num_transformer_blocks=2, num_attn_heads=2, embedding_dim=VOCAB_SIZE, input_layer_norm_params=[block_1_input_layer_norm, block_2_input_layer_norm], attn_heads_params=[block_1_attn_heads, block_2_attn_heads], attn_out_params=[block_1_attn_proj_out_params, block_2_attn_proj_out_params], feed_forward_params=[[block_1_ff_lin_1_params, block_1_ff_lin_2_params], [block_2_ff_lin_1_params, block_2_ff_lin_2_params]], feed_forward_layer_norm_params=[block_1_ff_layer_norm, block_2_ff_layer_norm])
+
+    # Forward passes
+    atom_out = atom_model(atom_x)
+    torch_out = torch_model(torch_x)
+    # torch_outs.retain_grad()
+
+    # Backward passes
+    torch_out.backward(torch_grad)
+    backward(atom_out, atom_grad)
+
+    # Manual checking each parameters gradients 
+    print(atom_params[0]['grad'])
+    print(torch_model.blocks[0].ln1.weight.grad)
+    
+    # TODO: Write a function that get the comparison of calulcated gradien atom and pytorch for each model parameters
+
+compare_transformer_block()
 
 # NOTE: This test is disable the dropout since it will make a random dropout for the activation
 # I already have a test case about dropout and works perfectly fine
