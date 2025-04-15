@@ -17,7 +17,5 @@ def atom_kaiming_init(input_size, output_size):
     return [cuda_tensor(weights, requires_grad=True), cuda_tensor(bias, requires_grad=True)]
 
 def atom_embedding_weight(vocab_size, embedding_dim):
-    gen_w = cp.empty(shape=(vocab_size, embedding_dim))
-    weight = atom_init.kaiming_uniform(gen_w, a=math.sqrt(5))
-
+    weight = cp.random.normal(loc=0.0, scale=1.0, size=(vocab_size, embedding_dim))
     return cuda_tensor(weight, requires_grad=True)
