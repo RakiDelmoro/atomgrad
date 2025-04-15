@@ -25,34 +25,47 @@ def dropout(p, train=True):
 
     return forward
 
-def layer_norm(normalized_shape, eps=1e-5):
+def layer_norm(normalized_shape, eps=1e-5, params=None):
     learnable_parameters = []
-
-    weight = cuda_atom.cuda_tensor(cp.ones(shape=normalized_shape, dtype=cp.float32), requires_grad=True)
-    bias = cuda_atom.cuda_tensor(cp.zeros(shape=normalized_shape, dtype=cp.float32), requires_grad=True)
+    
+    if params is None:
+        weight = cuda_atom.cuda_tensor(cp.ones(shape=normalized_shape, dtype=cp.float32), requires_grad=True)
+        bias = cuda_atom.cuda_tensor(cp.zeros(shape=normalized_shape, dtype=cp.float32), requires_grad=True)
+    else:
+        weight = cuda_atom.cuda_tensor(params[0].numpy(), requires_grad=True)
+        bias = cuda_atom.cuda_tensor(params[1].numpy(), requires_grad=True)
 
     learnable_parameters.extend([weight])
     learnable_parameters.extend([bias])
 
     def forward(atom_tensor):
         x_normalized = cuda_atom.layer_norm_(atom_tensor, eps)
-        apply_layer_norm = cuda_atom.add(cuda_atom.mul(weight, x_normalized), bias)
+        mul_result = cuda_atom.mul(weight, x_normalized)
+        apply_layer_norm = cuda_atom.add(mul_result, bias)
 
         return apply_layer_norm
 
     return forward, learnable_parameters
 
-def embeddings(num_embeddings, embedding_dim):
-    parameters = init.atom_embedding_weight(num_embeddings, embedding_dim)
+def embeddings(num_embeddings, embedding_dim, parameters=None):
+    learnable_parameters = init.atom_embedding_weight(num_embeddings, embedding_dim)
+    if parameters is not None:
+        learnable_parameters = cuda_atom.cuda_tensor(parameters.numpy(), requires_grad=True)
+
     def forward(indices):
-        result = cuda_atom.embeddings_(indices, parameters)
+        result = cuda_atom.embeddings_(indices, learnable_parameters)
 
         return result
 
-    return forward, parameters
+    return forward, learnable_parameters
 
-def linear_layer(input_size, output_size, bias=True):
+def linear_layer(input_size, output_size, parameters=None, bias=True):
     learnable_parameters = init.atom_kaiming_init(input_size, output_size)
+    if parameters is not None:
+        if not bias:
+            learnable_parameters = [cuda_atom.cuda_tensor(parameters[0].data.numpy(), requires_grad=True)]
+        else:
+            learnable_parameters = [cuda_atom.cuda_tensor(parameters[0].data.numpy(), requires_grad=True), cuda_atom.cuda_tensor(parameters[1].data.numpy(), requires_grad=True)]
 
     def forward(data):
         result = cuda_atom.matmul(data, learnable_parameters[0])
@@ -99,12 +112,12 @@ def attention_layer(head_size, embedding_dim):
         attention_weight = cuda_atom.matmul(attention_scores, value_projection)
 
         return attention_weight
-    
+
     return forward, learnable_parameters    
 
 def multi_head_attention_layer(num_heads, head_size, embedding_dim):
     learnable_parameters = []
-    
+
     attention_blocks = []
     for _ in range(num_heads): 
         attn_block, attn_params = attention_layer(head_size, embedding_dim)
@@ -121,7 +134,7 @@ def multi_head_attention_layer(num_heads, head_size, embedding_dim):
         out_dropout = dropout_proj(concatenated_attn_heads)
 
         return out_projection(out_dropout)
-    
+
     return forward, learnable_parameters
 
 def transformer_block(num_attn_heads, embedding_dim):
@@ -160,7 +173,6 @@ def transformer_block(num_attn_heads, embedding_dim):
 
         # Residual Connection
         out = cuda_atom.add(mha_output, ff_out)
-
         return out
 
     return forward, learnable_parameters
