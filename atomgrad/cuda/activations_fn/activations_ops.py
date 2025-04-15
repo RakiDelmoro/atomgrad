@@ -1,6 +1,6 @@
 import cupy as cp
-# import atomgrad.cuda.atom as cuda_atom
-import atom as cuda_atom
+import atomgrad.cuda.atom as cuda_atom
+# import atom as cuda_atom
 
 '''Activation ops consist of forward pass and backward pass calculation'''
 
@@ -18,11 +18,11 @@ def softmax_ops(atom_tensor):
         if requires_grad:
             if atom_tensor['grad'].ndim == grad.ndim:
                 sum_term = (softmax_data['data'] * grad).sum(axis=-1, keepdims=True)
-                atom_tensor['grad'] = softmax_data['data'] * (grad - sum_term)
+                atom_tensor['grad'] += softmax_data['data'] * (grad - sum_term)
             else:
                 grad = cp.sum(grad, axis=-1)
                 sum_term = (softmax_data['data'] * grad).sum(axis=-1, keepdims=True)
-                atom_tensor['grad'] = softmax_data['data'] * (grad - sum_term)
+                atom_tensor['grad'] += softmax_data['data'] * (grad - sum_term)
 
     softmax_data['grad_fn'] = backward
 
@@ -42,9 +42,9 @@ def relu_ops(atom_tensor):
         if requires_grad:
             if atom_tensor['grad'].ndim == grad.ndim:
                 # Derivative of ReLU applied with chain rule
-                atom_tensor['grad'] = cp.where(relu_data['data'] > 0, 1, 0) * grad
+                atom_tensor['grad'] += cp.where(relu_data['data'] > 0, 1, 0) * grad
             else:
-                atom_tensor['grad'] = cp.where(relu_data['data'] > 0, 1, 0) * cp.sum(grad, axis=-1)
+                atom_tensor['grad'] += cp.where(relu_data['data'] > 0, 1, 0) * cp.sum(grad, axis=-1)
 
     relu_data['grad_fn'] = backward
 
@@ -60,9 +60,9 @@ def leaky_relu_ops(atom_tensor):
         if requires_grad:
             if atom_tensor['grad'].ndim == grad.ndim:
                 # Derivative of ReLU applied with chain rule
-                atom_tensor['grad'] = cp.where(leaky_data['data'] > 0, 1, 0.05 * leaky_data['data']) * grad
+                atom_tensor['grad'] += cp.where(leaky_data['data'] > 0, 1, 0.05 * leaky_data['data']) * grad
             else:
-                atom_tensor['grad'] = cp.where(leaky_data['data'] > 0, 1, 0.05 * leaky_data['data']) * cp.sum(grad, axis=-1)
+                atom_tensor['grad'] += cp.where(leaky_data['data'] > 0, 1, 0.05 * leaky_data['data']) * cp.sum(grad, axis=-1)
 
     leaky_data['grad_fn'] = backward
 
@@ -80,9 +80,9 @@ def tanh_ops(atom_tensor):
                 # Derivative of Tanh
                 deriv = (cp.exp(tanh_data['data']) - cp.exp(-tanh_data['data']))/(cp.exp(tanh_data['data']) + cp.exp(-tanh_data['data']))
                 # apply chain rule
-                atom_tensor['grad'] = deriv * grad
+                atom_tensor['grad'] += deriv * grad
             else:
-                atom_tensor['grad'] = deriv * cp.sum(grad, axis=-1)
+                atom_tensor['grad'] += deriv * cp.sum(grad, axis=-1)
 
     tanh_data['grad_fn'] = backward
 
