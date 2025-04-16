@@ -1,5 +1,6 @@
 import torch
 import cupy
+import numpy as np
 import atomgrad.atom as atom
 import atomgrad.cuda.atom as cuda_atom
 import atomgrad.cuda.loss_fn.loss_fn_nn as loss_nn
@@ -54,6 +55,8 @@ def backward(atom_tensor, grad=None):
                 if each['grad_fn'] is not None:
                     each['grad_fn'](each['grad'])
 
+                    node['grad'] = cupy.zeros_like(node['grad'])
+
                 # Throw it away after calculating/propagate the gradient
                 each['depends_on'] = []
                 each['grad_fn'] = None
@@ -61,6 +64,8 @@ def backward(atom_tensor, grad=None):
         else:
             if node['grad_fn'] is not None:
                 node['grad_fn'](node['grad'])
+
+                node['grad'] = cupy.zeros_like(node['grad'])
 
             # Throw it away after calculating/propagate the gradient
             node['depends_on'] = []
@@ -247,6 +252,9 @@ def compare_transformer_block(atom_grad=None, torch_grad=None):
     torch_x = torch.randn(BATCH, SEQ_LEN, VOCAB_SIZE, device='cuda')
     atom_x = cuda_atom.cuda_tensor(torch_x.detach().cpu().numpy(), requires_grad=True)
 
+    torch_y = torch.randint(low=0, high=VOCAB_SIZE, size=(BATCH, SEQ_LEN), device='cuda')
+    atom_y = cupy.array(torch_y.detach().cpu().numpy())
+
     torch_model = torch_transformer.TransformerBlocks(VOCAB_SIZE, NUM_HEAD)
 
     '''Transformer Block 1'''
@@ -276,17 +284,27 @@ def compare_transformer_block(atom_grad=None, torch_grad=None):
     # Forward passes
     atom_out = atom_model(atom_x)
     torch_out = torch_model(torch_x)
-    # torch_outs.retain_grad()
+
+    # Loss functions
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+    atom_loss_fn = loss_nn.cross_entropy_loss()
 
     # Backward passes
-    torch_out.backward(torch_grad)
-    backward(atom_out, atom_grad)
-
-    # Manual checking each parameters gradients 
-    print(atom_params[0]['grad'])
-    print(torch_model.blocks[0].ln1.weight.grad)
+    torch_loss = torch_loss_fn(torch_out.view(BATCH*SEQ_LEN, VOCAB_SIZE), torch_y.view(BATCH*SEQ_LEN))
+    torch_loss.backward()
     
-    # TODO: Write a function that get the comparison of calulcated gradien atom and pytorch for each model parameters
+    reshaped_atom_out = atom_out['data'].reshape(BATCH*SEQ_LEN, VOCAB_SIZE)
+    atom_out['data'] = reshaped_atom_out
+    atom_loss, atom_loss_grad = atom_loss_fn(atom_out, atom_y.reshape(BATCH*SEQ_LEN))
+    backward(atom_out, atom_loss_grad.reshape(BATCH, SEQ_LEN, VOCAB_SIZE))
+
+    # Check each parameters gradient
+    for i, params in enumerate(torch_model.parameters()):
+        # For 2d grad / Batch_size
+        # for 3d Batch*seq_len
+        atom_param_grad = cupy.asnumpy(atom_params[i]['grad'] / (BATCH*SEQ_LEN))
+        torch_param_grad = params.grad.cpu().numpy()
+        print(np.allclose(torch_param_grad, atom_param_grad, atol=1e-5))
 
 compare_transformer_block()
 
