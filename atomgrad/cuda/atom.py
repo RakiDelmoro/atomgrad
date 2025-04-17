@@ -6,26 +6,30 @@ import atomgrad.cuda.ops as ops
 
 def cuda_tensor(data, requires_grad=False):
     """Create a tensor with data and gradient tracking."""
-    return {'data': cp.array(data, dtype=cp.float32), 'shape': cp.array(data).shape, 'grad': cp.zeros_like(data) if requires_grad else None, 'requires_grad': requires_grad, 'grad_fn': None, 'depends_on': []}
+    data = cp.array(data, dtype=cp.float32)
+    shape = data.shape
+    strides = data.strides
+    grad = None
+    backward_fn = None
+    depends_on = []
+    return {'data': data, 'shape': shape, 'strides': strides, 'grad': grad, 'requires_grad': requires_grad, 'grad_fn': backward_fn, 'depends_on': depends_on}
 
 '''TENSOR OPS'''
 
 def add(x1, x2):
-    x1_shape = x1['shape']
-    x2_shape = x2['shape']
-
     requires_grad = x1['requires_grad'] or x2['requires_grad']
-
     result = cuda_tensor(ops._add(x1['data'], x2['data']), requires_grad)
+        
     result['depends_on'] = [x1, x2]
-
     def grad_fn(grad):
         if x1['requires_grad']:
+            x1['grad'] = cp.zeros_like(x1['data'])
             if x1['grad'].ndim == grad.ndim:
                 x1['grad'] += grad
             else:
                 x1['grad'] += cp.sum(grad, axis=0)
         if x2['requires_grad']:
+            x2['grad'] = cp.zeros_like(x2['data'])
             if x2['grad'].ndim == grad.ndim:                
                 x2['grad'] += grad
             else:
@@ -128,16 +132,23 @@ def matmul(x1, x2):
         x2_is_3d = x2['data'].ndim == 3
 
         if not x1_is_3d and not x2_is_3d:
-            if x1['requires_grad']: x1['grad'] += ((grad @ x2['data'])) 
-            if x2['requires_grad']: x2['grad'] += (grad.T @ x1['data']) 
+            if x1['requires_grad']:
+                x1['grad'] = cp.zeros_like(x1['data'])
+                x1['grad'] += ((grad @ x2['data'])) 
+            if x2['requires_grad']:
+                x2['grad'] = cp.zeros_like(x2['data'])
+                x2['grad'] += (grad.T @ x1['data']) 
         else:
             if x1_is_3d and not x2_is_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
                 if x1['requires_grad']:
+                    x1['grad'] = cp.zeros_like(x1['data'])
                     for i in range(x1_shape[0]): x1['grad'][i] += cp.outer(grad[i], x2['data'][i])
                 if x2['requires_grad']:
+                    x2['grad'] = cp.zeros_like(x2['data'])
                     for i in range(x2_shape[0]): x2['grad'][i] += cp.matmul(grad[i], x1['data'][i])
             else:
                 if x1['requires_grad']: 
+                    x1['grad'] = cp.zeros_like(x1['data'])
                     if not x1_is_3d: x1['grad'] += grad @ x2['data']
                     else:
                         if x2['data'].ndim == 2:
@@ -146,6 +157,7 @@ def matmul(x1, x2):
                             x1['grad'] += cp.matmul(grad, x2['data'].transpose(0, 2, 1))
 
                 if x2['requires_grad']:
+                    x2['grad'] = cp.zeros_like(x2['data'])
                     if not x2_is_3d: x2['grad'] += cp.sum(cp.matmul(grad.transpose(0, 2, 1), x1['data']), axis=0)
                     else:
                         if x2['grad'].shape == grad.shape:
