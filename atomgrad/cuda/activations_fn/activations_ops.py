@@ -40,6 +40,7 @@ def relu_ops(atom_tensor):
 
     def backward(grad):
         if requires_grad:
+            atom_tensor['grad'] = cp.zeros_like(atom_tensor['data'])
             if atom_tensor['grad'].ndim == grad.ndim:
                 # Derivative of ReLU applied with chain rule
                 atom_tensor['grad'] += cp.where(relu_data['data'] > 0, 1, 0) * grad
