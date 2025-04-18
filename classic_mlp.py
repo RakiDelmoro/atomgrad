@@ -33,14 +33,14 @@ def atom_runner():
     
     # Initialize Model
     parameters = []
-    linear_1, params_1 = cpu_nn_ops.linear_layer(784, 2000) if DEVICE == 'cpu' else cuda_nn_ops.linear_layer(784, 2000)
-    activation = cpu_act_ops.relu() if DEVICE == 'cpu' else cuda_act_ops.relu()
-    linear_2, params_2 = cpu_nn_ops.linear_layer(2000, 10) if DEVICE == 'cpu' else cuda_nn_ops.linear_layer(2000, 10)
+    linear_1, params_1 = cuda_nn_ops.linear_layer(784, 2000)
+    activation = cuda_act_ops.relu()
+    linear_2, params_2 = cuda_nn_ops.linear_layer(2000, 10)
     parameters.extend(params_1)
     parameters.extend(params_2)
 
-    loss_fn = cpu_loss_ops.cross_entropy_loss() if DEVICE == 'cpu' else cuda_loss_ops.cross_entropy_loss()
-    step, zero_grad = cpu_optimizer.adam(parameters, lr=LEARNING_RATE) if DEVICE == 'cpu' else cuda_optimizer.adam(parameters, lr=LEARNING_RATE)
+    loss_fn = cuda_loss_ops.cross_entropy_loss()
+    step, zero_grad = cuda_optimizer.adam(parameters, lr=LEARNING_RATE)
 
     for _ in (t := tqdm.trange(MAX_EPOCHS)):
         train_loader = mnist_dataloader(train_images, train_labels, batch_size=BATCH_SIZE, shuffle=True)
@@ -52,6 +52,8 @@ def atom_runner():
             batched_image = atom.tensor(batched_image, requires_grad=True, device=DEVICE)
             batched_label = atom.tensor(batched_label, device=DEVICE)
 
+            batch = batched_image['data'].shape[0]
+
             # Forward pass: linear 1 -> activation fn -> linear 2
             model_prediction = linear_2(activation(linear_1(batched_image)))
 
@@ -60,8 +62,8 @@ def atom_runner():
             
             zero_grad(parameters)
             atom.backward(model_prediction, gradients)
-            step(batched_image['data'].shape[0])
-            
+            step(batch)
+
             train_loss.append(avg_loss.item())
 
         # Test Loop
@@ -121,7 +123,7 @@ def torch_runner():
             model_prediction = mlp(batched_image)
 
             loss = loss_fn(model_prediction, batched_label)
-            
+
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -143,6 +145,18 @@ def torch_runner():
         accuracies = sum(accuracies) / len(accuracies)
 
         t.set_description(f'Loss: {train_loss:.4f} Accuracy: {accuracies:.4f}')
-    
+
+# Atom GPU behaves:
+# index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
+# 0, Quadro RTX 4000, 8192 MiB, 4644 MiB, 3352 MiB, 71, P0, 78 %, 44 %
+
+# Torch GPU behaves:
+# index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
+# 0, Quadro RTX 4000, 8192 MiB, 1577 MiB, 6419 MiB, 76, P0, 76 %, 24 %
+
+# TODO: Make atomgrad effecient as Pytorch
+# TODO: How can I make atomgrad memory efficient same as pytorch
+
 atom_runner()
-torch_runner()
+# torch_runner()
+
