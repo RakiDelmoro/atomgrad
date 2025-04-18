@@ -31,50 +31,36 @@ def _matmul(x1: cp.ndarray, x2: cp.ndarray):
     return cp.matmul(x1, x2)
 
 def _matmul_3d(x1: cp.ndarray, x2: cp.ndarray):
-    # Check num dim
-    x1_shape = x1.shape
-    x2_shape = x2.shape
+    # Ensure at least one array is 3D
+    x1_ndim, x2_ndim = x1.ndim, x2.ndim
+    if x1_ndim < 3 and x2_ndim < 3:
+        raise ValueError(f"At least one input must be 3D. Shapes: {x1.shape}, {x2.shape}")
 
-    # Check dimensions
-    is_x1_3d = len(x1_shape) == 3
-    is_x2_3d = len(x2_shape) == 3
+    # Promote arrays to 3D by adding leading singleton dimensions
+    x1_3d = x1.reshape((1,)*(3 - x1_ndim) + x1.shape) if x1_ndim < 3 else x1
+    x2_3d = x2.reshape((1,)*(3 - x2_ndim) + x2.shape) if x2_ndim < 3 else x2
 
-    if not is_x1_3d and not is_x2_3d:
-        raise ValueError(f"Should have 3d shape {x1.shape} {x2.shape}")
+    # Handle dimension alignment
+    try:
+        # Attempt automatic broadcasting with transpose fallback
+        result = cp.matmul(x1_3d, x2_3d.transpose(0, 2, 1) if x1_3d.shape[-1] != x2_3d.shape[-2] else cp.matmul(x1_3d, x2_3d))
+    except cp.cuda.cublas.CUBLASError:
+        # Fallback to manual alignment if automatic broadcasting fails
+        x2_3d = x2_3d.transpose(0, 2, 1)
+        if x1_3d.shape[-1] != x2_3d.shape[-2]:
+            raise ValueError(f"Incompatible inner dimensions: {x1_3d.shape[-1]} vs {x2_3d.shape[-2]}")
+        result = cp.matmul(x1_3d, x2_3d)
 
-    if not is_x1_3d and not is_x2_3d: result_data = cp.matmul(x1, x2.T)
-
-    elif is_x1_3d and not is_x2_3d:
-        if len(x2_shape) == 1: result_data = cp.matmul(x1, x2)
-        elif x2_shape[0] == x1_shape[0]:
-            result_data = cp.zeros((x1_shape[0], x1_shape[1]))
-            for i in range(x1_shape[0]): result_data[i] = cp.matmul(x1[i], x2[i])
-        else:
-            result_data = cp.zeros((x1_shape[0], x1_shape[1], x2_shape[0]))
-            for i in range(x1_shape[0]): result_data[i] = cp.matmul(x1[i], x2.T)
-
-    elif not is_x1_3d and is_x2_3d:
-        if len(x1_shape) == 1:
-            result_data = cp.zeros((x2_shape[0], x2_shape[2]))
-            for i in range(x2_shape[0]): result_data[i] = cp.matmul(x1, x2[i])
-        elif x1_shape[0] == x2_shape[0]:
-            result_data = cp.zeros((x2_shape[0], x2_shape[2]))
-            for i in range(x2_shape[0]): result_data[i] = cp.matmul(x1[i], x2[i])
-        else:
-            result_data = cp.zeros((x2_shape[0], x1_shape[0], x2_shape[2]))
-            for i in range(x2_shape[0]): result_data[i] = cp.matmul(x1, x2[i])
-
-    else:
-        # Both 3D case - batch dimensions should match
-        if x1_shape[0] != x2_shape[0]:
-            raise ValueError("Batch size must match for 3D-3D matmul")
-
-        # Case: (batch, m, n) @ (batch, n, p) -> (batch, m, p)
-        result_data = cp.zeros((x1_shape[0], x1_shape[1], x2_shape[2]))
-        for i in range(x1_shape[0]):
-            result_data[i] = cp.matmul(x1[i], x2[i])
-
-    return result_data
+    # Squeeze unnecessary dimensions based on original input shapes
+    squeeze_dims = []
+    if x1_ndim < 3 and x1_3d.shape[0] == 1:
+        squeeze_dims.append(0)
+    if x2_ndim < 3 and x2_3d.shape[0] == 1:
+        squeeze_dims.append(0)
+    if x1_ndim == 1 or x2_ndim == 1:
+        squeeze_dims.append(-1)
+    
+    return result.squeeze(axis=tuple(squeeze_dims)) if squeeze_dims else result
 
 def _broadcast_mul():
     pass
