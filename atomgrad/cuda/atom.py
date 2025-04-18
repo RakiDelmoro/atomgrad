@@ -19,24 +19,24 @@ def cuda_tensor(data, requires_grad=False):
 def add(x1, x2):
     requires_grad = x1['requires_grad'] or x2['requires_grad']
     result = cuda_tensor(ops._add(x1['data'], x2['data']), requires_grad)
-        
+
     result['depends_on'] = [x1, x2]
     def grad_fn(grad):
         if x1['requires_grad']:
             x1['grad'] = cp.zeros_like(x1['data'])
-            if x1['grad'].ndim == grad.ndim:
+            dim_diff = grad.ndim - x1['grad'].ndim
+            if dim_diff > 0:
+                x1['grad'] += grad.sum(axis=tuple(range(dim_diff)))
+            else:                
                 x1['grad'] += grad
-            else:
-                x1['grad'] += cp.sum(grad, axis=0)
+    
         if x2['requires_grad']:
             x2['grad'] = cp.zeros_like(x2['data'])
-            if x2['grad'].ndim == grad.ndim:                
-                x2['grad'] += grad
+            dim_diff = grad.ndim - x2['grad'].ndim
+            if dim_diff > 0:
+                x2['grad'] += grad.sum(axis=tuple(range(dim_diff)))
             else:
-                if x2['grad'].ndim == 2:
-                    x2['grad'] += grad.sum(axis=0)
-                elif x2['grad'].ndim == 1:
-                    x2['grad'] += cp.sum(cp.sum(grad, axis=0), axis=0)
+                x2['grad'] += grad
 
     result['grad_fn'] = grad_fn
 
@@ -106,6 +106,7 @@ def mul(x1, x2):
     def grad_fn(grad):
         """Backward function for multiplication."""
         if x1['requires_grad']:
+            x1['grad'] = cp.zeros_like(x1['data'])
             if x1['grad'].ndim == 1:
                 x1['grad'] += cp.sum(cp.sum(grad * x2['data'], axis=0), axis=0)
             
@@ -113,59 +114,61 @@ def mul(x1, x2):
                 x1['grad'] += grad * x2['data']
 
         if x2['requires_grad']:
+            x2['grad'] = cp.zeros_like(x2['data'])
             x2['grad'] += grad * x1['data']
     result['grad_fn'] = grad_fn
 
     return result
 
 def matmul(x1, x2):
+    x1_shape, x2_shape = x1['shape'], x2['shape']
+    x1_ndim, x2_ndim = x1['data'].ndim, x2['data'].ndim    
+
     requires_grad = x1['requires_grad'] or x2['requires_grad']
 
-    result = cuda_tensor(ops._matmul(x1['data'], x2['data'].T), requires_grad)
+    if x1_ndim != 3 or x2_ndim != 3:
+        result = cuda_tensor(ops._matmul(x1['data'], x2['data'].T), requires_grad=requires_grad)
+    else:
+        if x1_shape[1] != x2_shape[-1]:
+            if x1_shape[1] == x1_shape[-1]:
+                result = cuda_tensor(ops._matmul(x1['data'], x2['data']), requires_grad)
+            else:
+                result = cuda_tensor(ops._matmul(x1['data'], x2['data'].transpose(0,2,1)), requires_grad)
     result['depends_on'] = [x1, x2]
 
     def grad_fn(grad):
-        x1_shape = x1['shape']
-        x2_shape = x2['shape']
-
-        x1_is_3d = x1['data'].ndim == 3
-        x2_is_3d = x2['data'].ndim == 3
-
-        if not x1_is_3d and not x2_is_3d:
+        if x1_ndim != 3 and x2_ndim != 3:
             if x1['requires_grad']:
                 x1['grad'] = cp.zeros_like(x1['data'])
-                x1['grad'] += ((grad @ x2['data'])) 
+                x1['grad'] += cp.matmul(grad, x2['data'])
             if x2['requires_grad']:
                 x2['grad'] = cp.zeros_like(x2['data'])
-                x2['grad'] += (grad.T @ x1['data']) 
+                x2['grad'] += cp.matmul(grad.T, x1['data'])
+
+        elif x1_ndim == 3 and x2_ndim != 3:
+            if x1['requires_grad']:
+                x1['grad'] = cp.zeros_like(x1['data'])
+                x1['grad'] += cp.matmul(grad, x2['data'])
+            if x2['requires_grad']:
+                x2['grad'] = cp.zeros_like(x2['data'])
+                x2['grad'] += cp.matmul(grad.transpose(0,2,1), x1['data']).sum(axis=0)
+
         else:
-            if x1_is_3d and not x2_is_3d and len(x2_shape) == 2 and x2_shape[0] == x1_shape[0]:
+            if x1_shape == x2_shape:
                 if x1['requires_grad']:
                     x1['grad'] = cp.zeros_like(x1['data'])
-                    for i in range(x1_shape[0]): x1['grad'][i] += cp.outer(grad[i], x2['data'][i])
+                    x1['grad'] += cp.matmul(grad, x2['data'])
                 if x2['requires_grad']:
                     x2['grad'] = cp.zeros_like(x2['data'])
-                    for i in range(x2_shape[0]): x2['grad'][i] += cp.matmul(grad[i], x1['data'][i])
+                    x2['grad'] += cp.matmul(grad, x1['data'])
             else:
-                if x1['requires_grad']: 
+                if x1['requires_grad']:
                     x1['grad'] = cp.zeros_like(x1['data'])
-                    if not x1_is_3d: x1['grad'] += grad @ x2['data']
-                    else:
-                        if x2['data'].ndim == 2:
-                            for i in range(x1_shape[0]): x1['grad'][i] += cp.matmul(grad[i], x2['data'])
-                        else:
-                            x1['grad'] += cp.matmul(grad, x2['data'].transpose(0, 2, 1))
-
+                    x1['grad'] += cp.matmul(grad, x2['data'].transpose(0,2,1))
                 if x2['requires_grad']:
                     x2['grad'] = cp.zeros_like(x2['data'])
-                    if not x2_is_3d: x2['grad'] += cp.sum(cp.matmul(grad.transpose(0, 2, 1), x1['data']), axis=0)
-                    else:
-                        if x2['grad'].shape == grad.shape:
-                            for i in range(x2_shape[0]): x2['grad'][i] += x1['data'][i].T @ grad[i]
-                        else:
-                            # x2['grad'] += cp.matmul(grad, x1['data'])
-                            x2['grad'] += cp.matmul(x1['data'].transpose(0, -1, -2), grad).transpose(0, -1, -2)
-                        
+                    x2['grad'] += cp.matmul(x1['data'], grad)
+
     result['grad_fn'] = grad_fn
 
     return result
@@ -197,8 +200,9 @@ def concatenate(x: list | dict, axis=-1):
             start_idx = 0
             end_idx = x[0]['shape'][-1]
             for each in x:
-                each['grad'] += grad[:, :, start_idx:end_idx]
+                each['grad'] = cp.zeros_like(each['data'])
 
+                each['grad'] += grad[:, :, start_idx:end_idx]
                 start_idx += each['shape'][-1]
                 end_idx += each['shape'][-1]
         else:
