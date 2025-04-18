@@ -154,20 +154,23 @@ def matmul(x1, x2):
                 x2['grad'] += cp.matmul(grad.transpose(0,2,1), x1['data']).sum(axis=0)
 
         else:
+            if grad.shape == (2, 3, 3):
+                print('DEBUG')
+
             if x1_shape == x2_shape:
                 if x1['requires_grad']:
                     x1['grad'] = cp.zeros_like(x1['data'])
                     x1['grad'] += cp.matmul(grad, x2['data'])
                 if x2['requires_grad']:
                     x2['grad'] = cp.zeros_like(x2['data'])
-                    x2['grad'] += cp.matmul(grad, x1['data'])
+                    x2['grad'] += cp.matmul(x1['data'].transpose(0,2,1), grad).transpose(0,2,1)
             else:
                 if x1['requires_grad']:
                     x1['grad'] = cp.zeros_like(x1['data'])
                     x1['grad'] += cp.matmul(grad, x2['data'].transpose(0,2,1))
                 if x2['requires_grad']:
                     x2['grad'] = cp.zeros_like(x2['data'])
-                    x2['grad'] += cp.matmul(x1['data'], grad)
+                    x2['grad'] += cp.matmul(grad.transpose(0,2,1), x1['data']).transpose(0,2,1)
 
     result['grad_fn'] = grad_fn
 
@@ -239,6 +242,8 @@ def embeddings_(x, parameters):
     result['depends_on'] = [parameters]
 
     def grad_fn(grad):
+        parameters['grad'] = cp.zeros_like(parameters['data'])
+
         if x['data'].ndim == 2:
             indices = x['data'].astype(int).reshape(-1)
         else:
