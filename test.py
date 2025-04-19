@@ -55,8 +55,6 @@ def backward(atom_tensor, grad=None):
                 if each['grad_fn'] is not None:
                     each['grad_fn'](each['grad'])
 
-                    node['grad'] = cupy.zeros_like(node['grad'])
-
                 # Throw it away after calculating/propagate the gradient
                 each['depends_on'] = []
                 each['grad_fn'] = None
@@ -64,8 +62,6 @@ def backward(atom_tensor, grad=None):
         else:
             if node['grad_fn'] is not None:
                 node['grad_fn'](node['grad'])
-
-                node['grad'] = cupy.zeros_like(node['grad'])
 
             # Throw it away after calculating/propagate the gradient
             node['depends_on'] = []
@@ -95,7 +91,7 @@ def compare_embeddings(atom_grad=None, torch_grad=None):
     # Backward passes
     backward(atom_out, atom_grad)
     torch_out.backward(torch_grad)
-    
+
     embeddings_satisfied = torch.allclose(torch.tensor(cupy.asnumpy(atom_params[0]['grad'])), torch_model.char_embedding.weight.grad.cpu())
 
     print(f"{UNDERLINE}Character Embeddings satisfied{RESET}: {GREEN}{embeddings_satisfied}{RESET}")
@@ -119,8 +115,14 @@ def compare_attention(atom_grad=None, torch_grad=None):
     atom_model, atom_params = atom_transformer.attention_layer(VOCAB_SIZE // 1, VOCAB_SIZE, [query_weight], [key_weight], [value_weight])
 
     # Forward passes
-    torch_out = torch_model(torch_x)
-    atom_out = atom_model(atom_x)
+    torch_out, torch_qk, torch_q, torch_k, torch_v = torch_model(torch_x)
+    atom_out, atom_qk, atom_q, atom_k, atom_v = atom_model(atom_x)
+
+    torch_out.retain_grad()
+    torch_q.retain_grad()
+    torch_k.retain_grad()
+    torch_v.retain_grad()
+    torch_qk.retain_grad()
 
     # Backward passes
     backward(atom_out, atom_grad)
@@ -253,7 +255,7 @@ def compare_transformer_block(atom_grad=None, torch_grad=None):
     atom_x = cuda_atom.cuda_tensor(torch_x.detach().cpu().numpy(), requires_grad=True)
 
     torch_y = torch.randint(low=0, high=VOCAB_SIZE, size=(BATCH, SEQ_LEN), device='cuda')
-    atom_y = cupy.array(torch_y.detach().cpu().numpy())
+    atom_y = cuda_atom.cuda_tensor(cupy.array(torch_y.detach().cpu().numpy()))
 
     torch_model = torch_transformer.TransformerBlocks(VOCAB_SIZE, NUM_HEAD)
 
@@ -294,8 +296,10 @@ def compare_transformer_block(atom_grad=None, torch_grad=None):
     torch_loss.backward()
     
     reshaped_atom_out = atom_out['data'].reshape(BATCH*SEQ_LEN, VOCAB_SIZE)
+    reshaped_atom_y = atom_y['data'].reshape(BATCH*SEQ_LEN)
     atom_out['data'] = reshaped_atom_out
-    atom_loss, atom_loss_grad = atom_loss_fn(atom_out, atom_y.reshape(BATCH*SEQ_LEN))
+    atom_y['data'] = reshaped_atom_y
+    atom_loss, atom_loss_grad = atom_loss_fn(atom_out, atom_y)
     backward(atom_out, atom_loss_grad.reshape(BATCH, SEQ_LEN, VOCAB_SIZE))
 
     # Check each parameters gradient
@@ -304,9 +308,15 @@ def compare_transformer_block(atom_grad=None, torch_grad=None):
         # for 3d Batch*seq_len
         atom_param_grad = cupy.asnumpy(atom_params[i]['grad'] / (BATCH*SEQ_LEN))
         torch_param_grad = params.grad.cpu().numpy()
-        print(np.allclose(torch_param_grad, atom_param_grad, atol=1e-5))
+        print(atom_param_grad.shape, torch_param_grad.shape, np.allclose(torch_param_grad, atom_param_grad, atol=1e-5))
+        # print(atom_param_grad.shape, torch_param_grad.shape)
+        # print(torch_param_grad)
+        # print(atom_param_grad)
 
-compare_transformer_block()
+# compare_transformer_block()
+
+compare_embeddings()
+compare_attention()
 
 # NOTE: This test is disable the dropout since it will make a random dropout for the activation
 # I already have a test case about dropout and works perfectly fine
