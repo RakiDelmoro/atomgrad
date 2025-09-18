@@ -97,7 +97,7 @@ class atom:
         def grad_fn(grad):
             if x1_ndim != 3 and x2_ndim != 3:
                 if x1.requires_grad:
-                    x1.grad += np.matmul(grad, x2.data) if x1.device == 'cpu' else cp.matmul(grad, x2.data)
+                    x1.grad += np.matmul(grad, x2.data.T) if x1.device == 'cpu' else cp.matmul(grad, x2.data.T)
                 if x2.requires_grad:
                     x2.grad += np.matmul(grad.T, x1.data) if x1.device == 'cpu' else cp.matmul(grad.T, x1.data)
 
@@ -185,6 +185,24 @@ class atom:
 
         return ret
     
+    @staticmethod
+    def uniform(low, high, size=None, device='cpu', requires_grad=False):
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+    
+        arr = np.random.uniform(low, high, size).astype(np.float32) if device == 'cpu' else cp.random.uniform(low, high, size, dtype=cp.float32)
+        ret = atom(arr, device=device, requires_grad=requires_grad)
+
+        return ret
+    
+    @staticmethod
+    def randint(low, high, size=None, device='cpu', requires_grad=False):
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+    
+        arr = np.random.randint(low, high, size) if device == 'cpu' else cp.random.randint(low, high, size)
+        ret = atom(arr, device=device, requires_grad=requires_grad)
+
+        return ret
+
     def backward(self, grad=None):
         if not self.requires_grad: return
 
@@ -215,7 +233,3 @@ class atom:
     def zero_grad(self):
         arr = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
         self.grad = None if self.grad is None else arr
-
-
-# TODO: Write a function for matrix multiply and other operation need for training Neural Network
-
