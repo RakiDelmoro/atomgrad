@@ -71,6 +71,60 @@ class atom:
         out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='+', grad_fn=grad_fn)
 
         return out
+    
+    def matmul(x1, x2):
+        x1 = x1 if isinstance(x2, atom) else atom(x1)
+        x2 = x2 if isinstance(x2, atom) else atom(x2)
+        assert x1.device == x2.device, f'Must be same device'
+
+        # Gather the shape of two arrays
+        x1_shape, x2_shape = x1.shape, x2.shape
+        x1_ndim, x2_ndim = x1.ndim, x2.ndim
+
+        if x1_ndim != 3 or x2_ndim != 3:
+            result = np.matmul(x1.data, x2.data) if x1.device == 'cpu' else cp.matmul(x1.data, x2.data)
+        else:
+            if x1_shape[-1] != x2_shape[-1]:
+                result = np.matmul(x1.data, x2.data) if x1.device == 'cpu' else cp.matmul(x1.data, x2.data)
+            else:
+                result = np.matmul(x1.data, x2.data).transpose(0, 2, 1) if x1.device == 'cpu' else cp.matmul(x1.data, x2.data).transpose(0, 2, 1)
+
+        requires_grad = x1.requires_grad or x2.requires_grad
+
+        x1.grad = np.zeros_like(x1.data) if x1.device == 'cpu' else cp.zeros_like(x1.data)
+        x2.grad = np.zeros_like(x2.data) if x1.device == 'cpu' else cp.zeros_like(x2.data)
+
+        def grad_fn(grad):
+            if x1_ndim != 3 and x2_ndim != 3:
+                if x1.requires_grad:
+                    x1.grad += np.matmul(grad, x2.data) if x1.device == 'cpu' else cp.matmul(grad, x2.data)
+                if x2.requires_grad:
+                    x2.grad += np.matmul(grad.T, x1.data) if x1.device == 'cpu' else cp.matmul(grad.T, x1.data)
+
+            elif x1_ndim == 3 and x2_ndim != 3:
+                if x1.requires_grad:
+                    x1.grad += np.matmul(grad, x2.data) if x1.device == 'cpu' else cp.matmul(grad, x2.data)
+                if x2.requires_grad:
+                    x2.grad += np.matmul(grad.transpose(0,2,1), x1.data).sum(axis=0) if x1.device == 'cpu' else cp.matmul(grad.transpose(0,2,1), x1.data).sum(axis=0)
+
+            else:
+                if grad.shape == (2, 3, 3):
+                    print('DEBUG')
+
+                if x1_shape == x2_shape:
+                    if x1.requires_grad:
+                        x1.grad += np.matmul(grad, x2.data) if x1.device == 'cpu' else cp.matmul(grad, x2.data)
+                    if x2.requires_grad:
+                        x2.grad += np.matmul(x1.data.transpose(0,2,1), grad).transpose(0,2,1) if x1.device == 'cpu' else cp.matmul(x1.data.transpose(0,2,1), grad).transpose(0,2,1)
+                else:
+                    if x1.requires_grad:
+                        x1.grad += np.matmul(grad, x2.data.transpose(0,2,1)) if x1.device == 'cpu' else cp.matmul(grad, x2.data.transpose(0,2,1))
+                    if x2.requires_grad:
+                        x2.grad += np.matmul(grad.transpose(0,2,1), x1.data).transpose(0,2,1) if x1.device == 'cpu' else cp.matmul(grad.transpose(0,2,1), x1.data).transpose(0,2,1)
+
+        out = atom(result, requires_grad=requires_grad, device=x1.device, depends_on=(x1, x2), operation='@', grad_fn=grad_fn)
+    
+        return out
 
     def __rmul__(self, other):
         return self * other
