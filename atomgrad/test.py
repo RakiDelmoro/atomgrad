@@ -1,5 +1,7 @@
 import torch
+import numpy as np
 from tensor import atom
+import nn 
 
 # Colors
 RED = '\033[31m'
@@ -10,9 +12,17 @@ def test_zeros():
     try:
         atom.zeros((2, 3), device='cuda', requires_grad=True)
         atom.zeros((2, 3), device='cpu', requires_grad=False)
-        print(f'{GREEN}Pass!{RESET}')
+        print(f'Test generate array of zeros --> {GREEN}Pass!{RESET}')
     except:
-        print(f'{RED}Failed!{RESET}')
+        print(f'Test generate array of zeros --> {RED}Failed!{RESET}')
+
+def test_empty():
+    try:
+        atom.empty((2, 3), device='cpu')
+        atom.empty((2, 3), device='cuda')
+        print(f'Test generate random value in array --> {GREEN}Pass!{RESET}')
+    except:
+        print(f'Test generate random value in array --> {RED}Failed!{RESET}')
 
 def test_add_ops():
     x1_cuda = atom.zeros((2, 3), device='cuda')
@@ -26,33 +36,67 @@ def test_add_ops():
         x2_cuda + x1_cuda
         x1_cpu + x2_cpu
         x2_cpu + x1_cpu
-        print(f'{GREEN}Pass!{RESET}')
+        print(f'Test adding two arrays --> {GREEN}Pass!{RESET}')
     except:
-        print(f'{RED}Failed!{RESET}')
+        print(f'Test adding two arrays --> {RED}Failed!{RESET}')
 
-def test_empty():
+def test_matmul_for_2d():
+    x1_atom = atom.randn((2, 3), device='cpu')
+    x2_atom = atom.randn((3, 2), device='cpu')
+
+    # Check if it has error
     try:
-        atom.empty((2, 3), device='cpu')
-        atom.empty((2, 3), device='cuda')
-        print(f'{GREEN}Pass!{RESET}')
+        atom.matmul(x1_atom, x2_atom)
+        print(f'Test if matmul works --> {GREEN}Pass!{RESET}')
     except:
-        print(f'{RED}Failed!{RESET}')
+        print(f'Test if matmtul works --> {RED}Failed!{RESET}')
 
-def test_backprop():
-    x1 = atom.randn((2, 3), device='cuda', requires_grad=True)
-    x2 = atom.randn((2, 3), device='cuda', requires_grad=True)
+    # Comparing Torch and Atom
+    x1_torch = torch.tensor(x1_atom.data, dtype=torch.float32)
+    x2_torch = torch.tensor(x2_atom.data, dtype=torch.float32)
 
-    test_grad = atom.randn((2, 3), device='cuda')
+    y_atom = atom.matmul(x1_atom, x2_atom)
+    y_torch = torch.matmul(x1_torch, x2_torch)
 
-    y = x1 + x2
+    satisfied = np.allclose(y_atom.data, y_torch.numpy())
 
-    y.backward(test_grad)
+    if satisfied:
+        print(f'Comparing matmul ops of Torch and Atom --> {GREEN}Pass!{RESET}')
+    else:
+        print(f'Comparing matmul ops of Torch and Atom --> {RED}Failed!{RESET}')
 
-    print(x1.grad)
-    print(x2.grad)
-    print(y.grad)
+def test_linear_ops():
+    x_test = torch.randn(2, 10)
+    y_test = torch.nn.functional.one_hot(torch.randint(0, 5, size=(2,)), num_classes=5).float()
+
+    torch_ln = torch.nn.Linear(10, 5)
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+
+    atom_x = atom(x_test, device='cuda', requires_grad=True)
+    atom_w = atom(torch_ln.weight.detach().numpy().T, device='cuda')
+    atom_b = atom(torch_ln.bias.detach().numpy().T, device='cuda')
+    atom_ln, atom_params = nn.linear(input_size=10, output_size=5, device='cuda', parameters=[atom_w,atom_b])
+    
+    y_atom = atom_ln(atom_x)
+    y_torch = torch_ln(x_test)
+
+    torch_loss = torch_loss_fn(y_torch, y_test)
+    y_torch.retain_grad()
+    
+    # Torch automatic gradient calculation
+    torch_loss.backward()
+    # Manual gradient calculation
+    grad = (y_torch.softmax(dim=-1) - y_test) / y_torch.shape[0]
+
+    print(y_torch.grad)
+    print()
+    print(grad)
+
+
+    # TODO: Add compare the Torch and Atom for both forward pass and backward pass to make sure Atom works correctly
 
 test_zeros()
-test_add_ops()
 test_empty()
-test_backprop()
+test_add_ops()
+test_matmul_for_2d()
+test_linear_ops()
