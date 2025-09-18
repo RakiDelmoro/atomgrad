@@ -24,7 +24,6 @@ class atom:
 
     def __mul__(self, other):
         other = other if isinstance(other, atom) else atom(other)
-        
         assert self.device == other.device, f'Must be same device'
         
         requires_grad = self.requires_grad or other.requires_grad
@@ -45,10 +44,9 @@ class atom:
         out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='+', grad_fn=grad_fn)
 
         return out
-    
+
     def __add__(self, other):
         other = other if isinstance(other, atom) else atom(other)
-        
         assert self.device == other.device, f'Must be same device'
         
         requires_grad = self.requires_grad or other.requires_grad
@@ -73,6 +71,12 @@ class atom:
         out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='+', grad_fn=grad_fn)
 
         return out
+
+    def __rmul__(self, other):
+        return self * other
+
+    def __radd__(self, other):
+        return self + other
 
     def __repr__(self):
         if self.requires_grad != False:
@@ -113,7 +117,7 @@ class atom:
     def randn(shape: Iterable[int], device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
 
-        arr = np.random.randn(*shape, dtype=np.float32) if device == 'cpu' else cp.random.randn(*shape, dtype=cp.float32)
+        arr = np.random.randn(*shape).astype(np.float32) if device == 'cpu' else cp.random.randn(*shape, dtype=cp.float32)
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
@@ -122,7 +126,7 @@ class atom:
     def rand(shape: Iterable[int], device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
 
-        arr = np.random.rand(*shape, dtype=np.float32) if device == 'cpu' else cp.random.rand(*shape, dtype=cp.float32)
+        arr = np.random.rand(*shape).astype(np.float32) if device == 'cpu' else cp.random.rand(*shape, dtype=cp.float32)
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
