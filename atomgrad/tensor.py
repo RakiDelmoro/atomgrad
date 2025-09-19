@@ -72,6 +72,12 @@ class atom:
 
         return out
     
+    def __sub__(self, other):
+        other = other if isinstance(other, atom) else atom(other)
+        assert self.device == other.device, f'Must be same device'
+
+        return self.data + (-other.data)
+    
     def matmul(x1, x2):
         x1 = x1 if isinstance(x2, atom) else atom(x1)
         x2 = x2 if isinstance(x2, atom) else atom(x2)
@@ -127,10 +133,22 @@ class atom:
         return out
 
     def __rmul__(self, other):
-        return self * other
+        other = other if isinstance(other, atom) else atom(other)
+        assert self.device == other.device, f'Must be same device'
+
+        return other.data * self.data
 
     def __radd__(self, other):
-        return self + other
+        other = other if isinstance(other, atom) else atom(other)
+        assert self.device == other.device, f'Must be same device'
+
+        return other.data + self.data
+    
+    def __rsub__(self, other):
+        other = other if isinstance(other, atom) else atom(other)
+        assert self.device == other.device, f'Must be same device'
+
+        return other.data + (-self.data)
 
     def __repr__(self):
         if self.requires_grad != False:
@@ -172,7 +190,10 @@ class atom:
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
 
         arr = np.random.randn(*shape).astype(np.float32) if device == 'cpu' else cp.random.randn(*shape, dtype=cp.float32)
+
         ret = atom(arr, device=device, requires_grad=requires_grad)
+        def grad_fn(grad): ret.grad = grad
+        ret._grad_fn = grad_fn if requires_grad else None
 
         return ret
 
@@ -198,7 +219,19 @@ class atom:
     def randint(low, high, size=None, device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
 
-        arr = np.random.randint(low, high, size) if device == 'cpu' else cp.random.randint(low, high, size)
+        arr = np.random.randint(low, high, size, dtype=np.longlong) if device == 'cpu' else cp.random.randint(low, high, size, dtype=cp.longlong)
+
+        ret = atom(arr, device=device, requires_grad=requires_grad)
+        def grad_fn(grad): ret.grad = grad
+        ret._grad_fn = grad_fn if requires_grad else None
+
+        return ret
+
+    @staticmethod
+    def arange(start, end, step, device='cpu', requires_grad=False):
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+
+        arr = np.arange(start, end, step) if device == 'cpu' else cp.arange(start, end, step)
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
@@ -214,7 +247,7 @@ class atom:
         sum_exp = np.sum(exp, axis=dim, keepdims=True)
         applied_softmax = exp / sum_exp
 
-        out = atom(applied_softmax, self.requires_grad, self._depends_on)
+        out = atom(applied_softmax, self.device, self.requires_grad, self._depends_on)
 
         def grad_fn(grad):
             if self.requires_grad:
@@ -260,6 +293,17 @@ class atom:
 
         return atom(shifted - log_sum, self.device, self.requires_grad, self._depends_on)
 
+    def one_hot(self, num_classes):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        one_hot_arr = np.zeros((len(self.data), num_classes)) if self.device == 'cpu' else cp.zeros((len(self.data), num_classes))
+        if self.device == 'cpu':
+            one_hot_arr[np.arange(len(self.data)), self.data.astype(np.longlong)] = 1
+        else:
+            one_hot_arr[cp.arange(len(self.data)), self.data.astype(cp.longlong)] = 1
+
+        return atom(one_hot_arr, self.device, self.requires_grad, self._depends_on)
+
     def backward(self, grad=None):
         if not self.requires_grad: return
 
@@ -282,7 +326,12 @@ class atom:
         # gradients dict
         for node in reversed(topo):
             if node._grad_fn is not None:
-                node._grad_fn(node.grad)
+                if node._operation == 'cross_entropy':
+                    cross_entropy_deriv = self._depends_on[0].softmax(dim=-1) - self._depends_on[1]
+                else:
+                    node.grad = self.grad * cross_entropy_deriv
+                    node._grad_fn(node.grad)
+                    cross_entropy_deriv = node.grad    
 
                 node._depends_on = []
                 node._grad_fn = None
