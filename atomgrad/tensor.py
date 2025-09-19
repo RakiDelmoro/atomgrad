@@ -175,7 +175,7 @@ class atom:
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
-    
+
     @staticmethod
     def rand(shape: Iterable[int], device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
@@ -184,7 +184,7 @@ class atom:
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
-    
+
     @staticmethod
     def uniform(low, high, size=None, device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
@@ -197,11 +197,68 @@ class atom:
     @staticmethod
     def randint(low, high, size=None, device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
-    
+
         arr = np.random.randint(low, high, size) if device == 'cpu' else cp.random.randint(low, high, size)
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
+    
+    def softmax(self, dim):
+        device = self.device
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+
+        # Softmax
+        max_val_arr = np.max(self.data, axis=dim, keepdims=True) if self.device == 'cpu' else cp.max(self.data, axis=dim, keepdims=True)
+        shifted_data = self.data - max_val_arr
+        exp = np.exp(shifted_data) if self.device == 'cpu' else cp.exp(shifted_data)
+        sum_exp = np.sum(exp, axis=dim, keepdims=True)
+        applied_softmax = exp / sum_exp
+
+        out = atom(applied_softmax, self.requires_grad, self._depends_on)
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
+                if self.ndim == grad.ndim:
+                    sum_term = (out.data * grad.data).sum(axis=dim, keepdims=True)
+                    self.grad += out.data * (grad.data - sum_term)
+                else:
+                    grad = np.sum(grad.data, axis=-1)
+                    sum_term = (out.data * grad.data).sum(axis=dim, keepdims=True)
+                    self.grad += out.data * (grad.data - sum_term)
+
+        out._grad_fn = grad_fn
+        return out
+
+    def relu(self):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        # Relu
+        applied_relu = np.maximum(0, self.data) if self.device == 'cpu' else cp.maximum(0, self.data)
+
+        out = atom(applied_relu, self.device, self.requires_grad, self.requires_grad)
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
+                if self.ndim == grad.ndim:
+                    deriv = np.where(out.data > 0, 1, 0) * grad.data if self.device == 'cpu' else cp.where(self.data > 0, 1, 0) * grad.data
+                    self.grad += deriv
+                else:
+                    deriv = np.where(out.data > 0, 1, 0) * np.sum(grad.data, axis=-1) if self.device == 'cpu' else cp.where(out.data > 0, 1, 0) * cp.sum(grad.data, axis=-1)
+                    self.grad += deriv
+
+        out._grad_fn = grad_fn
+        return out
+    
+    def log_softmax(self, dim):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        max_val_arr = np.max(self.data, axis=dim, keepdims=True) if self.device == 'cpu' else cp.max(self.data, axis=dim, keepdims=True)
+        shifted = self.data - max_val_arr
+        log_sum = np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True)) if self.device == 'cpu' else cp.log(cp.sum(cp.exp(shifted), axis=-1, keepdims=True))
+
+        return atom(shifted - log_sum, self.device, self.requires_grad, self._depends_on)
 
     def backward(self, grad=None):
         if not self.requires_grad: return
