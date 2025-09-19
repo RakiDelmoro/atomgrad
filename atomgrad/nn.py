@@ -79,7 +79,28 @@ def linear(input_size, output_size, device='cpu', bias=True, parameters=None):
 
         weight_proj = atom.matmul(data, weights)
         result = weight_proj + bias
-        
+
         return result
 
     return forward, learnable_params
+
+def cross_entropy():
+
+    def forward(model_output, expected_output):
+        assert model_output.data.dtype in [cp.float32, np.float32], f'model output should have float32 dtype, got {model_output.data.dtype}'
+        assert expected_output.data.dtype in [cp.float32, np.float32], f'model output should have float32 dtype, got {expected_output.data.dtype}'
+
+        if model_output.device == 'cpu':
+            avg_loss = -np.mean(np.sum((expected_output * model_output.log_softmax(dim=-1)).data, axis=-1))
+        else:
+            avg_loss = -cp.mean(cp.sum((expected_output * model_output.log_softmax(dim=-1)).data, axis=-1))
+
+        def grad_fn(grad):
+            model_output.grad = grad
+            expected_output.grad = grad
+
+        scalar_loss = atom(avg_loss, model_output.device, model_output.requires_grad, depends_on=[model_output, expected_output], operation='cross_entropy', grad_fn=grad_fn)
+
+        return scalar_loss
+    
+    return forward
