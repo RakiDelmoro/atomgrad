@@ -54,32 +54,46 @@ class atom:
 
         def grad_fn(grad):
             if self.requires_grad:
-                self.grad = cp.zeros_like(self.data) if self.device == 'cuda' else np.zeros_like(self.data)
+                self.grad = atom.zeros_like(self, self.device)
                 dim_diff = grad.ndim - self.grad.ndim
                 if dim_diff > 0:
                     self.grad += atom(grad.data.sum(axis=tuple(range(dim_diff))), self.device)
                 else:
-                    self.grad += grad.data
+                    self.grad += grad
             if other.requires_grad:
-                other.grad = cp.zeros_like(self.data) if self.device == 'cuda' else np.zeros_like(self.data)
+                other.grad = atom.zeros_like(other, other.device)
                 dim_diff = grad.ndim - other.grad.ndim
                 if dim_diff > 0:
                     other.grad += atom(grad.data.sum(axis=tuple(range(dim_diff))), self.device)
                 else:
-                    other.grad += grad.data
+                    other.grad += grad
 
         out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='+', grad_fn=grad_fn)
+
+        return out
+    
+    def __truediv__(self, other):
+        other = other if isinstance(other, atom) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = self.data * other.data**-1
+        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
 
         return out
     
     def __sub__(self, other):
         other = other if isinstance(other, atom) else atom(other)
         assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
 
-        return self.data + (-other.data)
+        result = self.data + (-other.data)
+        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+
+        return out
     
     def matmul(x1, x2):
-        x1 = x1 if isinstance(x2, atom) else atom(x1)
+        x1 = x1 if isinstance(x1, atom) else atom(x1)
         x2 = x2 if isinstance(x2, atom) else atom(x2)
         assert x1.device == x2.device, f'Must be same device'
 
@@ -97,15 +111,15 @@ class atom:
 
         requires_grad = x1.requires_grad or x2.requires_grad
 
-        x1.grad = np.zeros_like(x1.data) if x1.device == 'cpu' else cp.zeros_like(x1.data)
-        x2.grad = np.zeros_like(x2.data) if x1.device == 'cpu' else cp.zeros_like(x2.data)
+        x1.grad = atom.zeros_like(x1, x1.device)
+        x2.grad = atom.zeros_like(x2, x2.device)
 
         def grad_fn(grad):
             if x1_ndim != 3 and x2_ndim != 3:
                 if x1.requires_grad:
-                    x1.grad += np.matmul(grad, x2.data.T) if x1.device == 'cpu' else cp.matmul(grad, x2.data.T)
+                    x1.grad += atom.matmul(grad, x2.T())
                 if x2.requires_grad:
-                    x2.grad += np.matmul(grad.T, x1.data) if x1.device == 'cpu' else cp.matmul(grad.T, x1.data)
+                    x2.grad += atom.matmul(grad.T(), x1).T()
 
             elif x1_ndim == 3 and x2_ndim != 3:
                 if x1.requires_grad:
@@ -135,26 +149,54 @@ class atom:
     def __rmul__(self, other):
         other = other if isinstance(other, atom) else atom(other)
         assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
 
-        return other.data * self.data
+        result = other.data * self.data
+        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+
+        return out
 
     def __radd__(self, other):
         other = other if isinstance(other, atom) else atom(other)
         assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
 
-        return other.data + self.data
+        result = other.data + self.data
+        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+
+        return out
     
     def __rsub__(self, other):
         other = other if isinstance(other, atom) else atom(other)
         assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
 
-        return other.data + (-self.data)
+        result = other.data + (-self.data)
+        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+
+        return out
+
+    def __rtruediv__(self, other):
+        other = other if isinstance(other, atom) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = other.data * self.data**-1
+        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+
+        return out
 
     def __repr__(self):
         if self.requires_grad != False:
-            ret = f"tensor({self.data}, device='{self.device}', requires_grad={self.requires_grad})"
+            if len(self.shape) == 0:
+                ret = f"tensor({self.data:.4f}, device='{self.device}', requires_grad={self.requires_grad})"
+            else:
+                ret = f"tensor({self.data.round(4)}, device='{self.device}', requires_grad={self.requires_grad})"
         else:
-            ret = f"tensor({self.data}, device='{self.device}')"
+            if len(self.shape) == 0:
+                ret = f"tensor({self.data:.4f}, device='{self.device}'"
+            else:
+                ret = f"tensor({self.data.round(4)}, device='{self.device}'"
 
         return ret
 
@@ -303,6 +345,16 @@ class atom:
             one_hot_arr[cp.arange(len(self.data)), self.data.astype(cp.longlong)] = 1
 
         return atom(one_hot_arr, self.device, self.requires_grad, self._depends_on)
+    
+    def T(self):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+        return atom(self.data.T, self.device, self.requires_grad)
+    
+    def zeros_like(atom_tensor, device):
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+        result = np.zeros_like(atom_tensor.data) if device == 'cpu' else cp.zeros_like(atom_tensor.data)
+
+        return atom(result, device)
 
     def backward(self, grad=None):
         if not self.requires_grad: return
@@ -329,7 +381,7 @@ class atom:
                 if node._operation == 'cross_entropy':
                     cross_entropy_deriv = self._depends_on[0].softmax(dim=-1) - self._depends_on[1]
                 else:
-                    node.grad = self.grad * cross_entropy_deriv
+                    node.grad = (self.grad * cross_entropy_deriv)
                     node._grad_fn(node.grad)
                     cross_entropy_deriv = node.grad    
 
