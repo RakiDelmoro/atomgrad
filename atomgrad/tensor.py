@@ -309,18 +309,19 @@ class atom:
 
         # Relu
         applied_relu = np.maximum(0, self.data) if self.device == 'cpu' else cp.maximum(0, self.data)
-
-        out = atom(applied_relu, self.device, self.requires_grad, self.requires_grad)
+        out = atom(applied_relu, self.device, self.requires_grad, [self,])
 
         def grad_fn(grad):
             if self.requires_grad:
-                self.grad = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
+                self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == grad.ndim:
                     deriv = np.where(out.data > 0, 1, 0) * grad.data if self.device == 'cpu' else cp.where(self.data > 0, 1, 0) * grad.data
-                    self.grad += deriv
+                    grad_propagated = atom(deriv, self.device)
+                    self.grad += grad_propagated
                 else:
                     deriv = np.where(out.data > 0, 1, 0) * np.sum(grad.data, axis=-1) if self.device == 'cpu' else cp.where(out.data > 0, 1, 0) * cp.sum(grad.data, axis=-1)
-                    self.grad += deriv
+                    grad_propagated = atom(deriv, self.device)
+                    self.grad += grad_propagated
 
         out._grad_fn = grad_fn
         return out
