@@ -25,7 +25,7 @@ class atom:
     def __mul__(self, other):
         other = other if isinstance(other, atom) else atom(other)
         assert self.device == other.device, f'Must be same device'
-        
+
         requires_grad = self.requires_grad or other.requires_grad
         result = self.data * other.data
 
@@ -36,7 +36,7 @@ class atom:
                     self.grad += cp.sum(cp.sum(grad.data * other.data, axis=0), axis=0) if self.device == 'cuda' else np.sum(np.sum(grad.data * other.data, axis=0), axis=0)
                 if self.ndim == grad.ndim:
                     self.grad += atom(grad.data * other.data, self.device)
-            
+
             if other.requires_grad:
                 other.grad = cp.zeros_like(self.shape) if self.device == 'cuda' else np.zeros_like(self.shape)
                 other.grad += atom(grad * self.data, self.device)
@@ -91,7 +91,7 @@ class atom:
         out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
 
         return out
-    
+
     def matmul(x1, x2):
         x1 = x1 if isinstance(x1, atom) else atom(x1)
         x2 = x2 if isinstance(x2, atom) else atom(x2)
@@ -111,14 +111,13 @@ class atom:
 
         requires_grad = x1.requires_grad or x2.requires_grad
 
-        x1.grad = atom.zeros_like(x1, x1.device)
-        x2.grad = atom.zeros_like(x2, x2.device)
-
         def grad_fn(grad):
             if x1_ndim != 3 and x2_ndim != 3:
                 if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device)
                     x1.grad += atom.matmul(grad, x2.T())
                 if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device)
                     x2.grad += atom.matmul(grad.T(), x1).T()
 
             elif x1_ndim == 3 and x2_ndim != 3:
@@ -325,7 +324,7 @@ class atom:
 
         out._grad_fn = grad_fn
         return out
-    
+
     def log_softmax(self, dim):
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
 
@@ -375,18 +374,13 @@ class atom:
         else:
             self.grad = grad
 
-        # gradients dict
         for node in reversed(topo):
             if node._grad_fn is not None:
                 if node._operation == 'cross_entropy':
-                    cross_entropy_deriv = self._depends_on[0].softmax(dim=-1) - self._depends_on[1]
+                    cross_entropy_grad = node._depends_on[0].softmax(dim=-1) - node._depends_on[1]
+                    node._grad_fn(cross_entropy_grad)
                 else:
-                    node.grad = (self.grad * cross_entropy_deriv)
                     node._grad_fn(node.grad)
-                    cross_entropy_deriv = node.grad    
-
-                node._depends_on = []
-                node._grad_fn = None
 
     def zero_grad(self):
         arr = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
