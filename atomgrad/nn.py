@@ -84,6 +84,15 @@ def linear(input_size, output_size, device='cpu', bias=True, parameters=None):
 
     return forward, learnable_params
 
+'''Activation Function'''
+def relu():
+
+    def forward(atom_tensor):
+        return atom_tensor.relu()
+    
+    return forward
+
+''' LOSS Function'''
 def cross_entropy():
 
     def forward(model_output, expected_output):
