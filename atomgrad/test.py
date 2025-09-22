@@ -243,7 +243,6 @@ def test_2_layer_linear_ops():
     # Atom automatic gradient calculation
     atom_loss.backward()
 
-
     weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy())
     bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy())
 
@@ -252,10 +251,70 @@ def test_2_layer_linear_ops():
     else:
         print(f'Two linear layer test --> {RED}Failed!{RESET}')
 
-test_zeros()
-test_empty()
-test_add_ops()
-test_matmul_for_2d()
+def test_2_layer_with_act_linear_ops():
+    # Dataset
+    BATCH_SIZE = 2
+    INPUT_DIM = 10
+    HIDDEN_DIM = 5
+    OUTPUT_DIM = 5
+    x_test = torch.randn(2, INPUT_DIM)
+    y_test = torch.nn.functional.one_hot(torch.randint(0, OUTPUT_DIM, size=(BATCH_SIZE,)), num_classes=OUTPUT_DIM).float()
+    atom_x = atom(x_test)
+    atom_y = atom(y_test)
+
+    # Torch Configs
+    torch_ln_1 = torch.nn.Linear(INPUT_DIM, HIDDEN_DIM)
+    torch_act = torch.nn.ReLU()
+    torch_ln_2 = torch.nn.Linear(HIDDEN_DIM, OUTPUT_DIM)
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+
+    # Atom Configs
+    atom_w_ln_1 = atom(torch_ln_1.weight.detach().numpy().T, requires_grad=True)
+    atom_b_ln_1 = atom(torch_ln_1.bias.detach().numpy(), requires_grad=True)
+    atom_ln_1, _ = nn.linear(input_size=INPUT_DIM, output_size=HIDDEN_DIM, parameters=[atom_w_ln_1,atom_b_ln_1])
+    
+    atom_act = nn.relu()
+
+    atom_w_ln_2 = atom(torch_ln_2.weight.detach().numpy().T, requires_grad=True)
+    atom_b_ln_2 = atom(torch_ln_2.bias.detach().numpy(), requires_grad=True)
+    atom_ln_2, _ = nn.linear(input_size=HIDDEN_DIM, output_size=OUTPUT_DIM, parameters=[atom_w_ln_2, atom_b_ln_2])
+    
+    atom_loss_fn = nn.cross_entropy()
+
+    # Forward passes
+    atom_lin_1_out = atom_ln_1(atom_x)
+    atom_act_out = atom_act(atom_lin_1_out)
+    atom_lin_2_out = atom_ln_2(atom_act_out)
+
+    torch_lin_1_out = torch_ln_1(x_test)
+    torch_act_out = torch_act(torch_lin_1_out)
+    torch_lin_2_out = torch_ln_2(torch_act_out)
+
+    # Torch loss calculation
+    torch_loss = torch_loss_fn(torch_lin_2_out, y_test)
+    torch_lin_1_out.retain_grad()
+    torch_act_out.retain_grad()
+    torch_lin_2_out.retain_grad()
+    # Atom loss calculation
+    atom_loss = atom_loss_fn(atom_lin_2_out, atom_y)
+    torch_loss.retain_grad()
+    # Torch automatic gradient calculation
+    torch_loss.backward()
+    # Atom automatic gradient calculation
+    atom_loss.backward()
+
+    weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy())
+    bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy())
+
+    if weight_grad_satisfied and bias_grad_satisfied:
+        print(f'Two linear layer with activation test --> {GREEN}Pass!{RESET}')
+    else:
+        print(f'Two linear layer with activation test --> {RED}Failed!{RESET}')
+
+# test_zeros()
+# test_empty()
+# test_add_ops()
+# test_matmul_for_2d()
 test_softmax()
 test_relu()
 test_log_softmax()
@@ -263,3 +322,4 @@ test_one_hot()
 test_cross_entropy()
 test_1_layer_linear_ops()
 test_2_layer_linear_ops()
+test_2_layer_with_act_linear_ops()
