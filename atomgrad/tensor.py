@@ -112,6 +112,9 @@ class atom:
         requires_grad = x1.requires_grad or x2.requires_grad
 
         def grad_fn(grad):
+            if x1.ndim != grad.ndim and x2.ndim != grad.ndim:
+                grad.data = grad.data.reshape(x2.shape)
+
             if x1_ndim != 3 and x2_ndim != 3:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device)
@@ -119,27 +122,36 @@ class atom:
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device)
                     x2.grad += atom.matmul(grad.T(), x1).T()
-
             elif x1_ndim == 3 and x2_ndim != 3:
                 if x1.requires_grad:
-                    x1.grad += np.matmul(grad, x2.data) if x1.device == 'cpu' else cp.matmul(grad, x2.data)
+                    x1.grad = atom.zeros_like(x1, x1.device)
+                    x1.grad += atom.matmul(grad, x2)
                 if x2.requires_grad:
-                    x2.grad += np.matmul(grad.transpose(0,2,1), x1.data).sum(axis=0) if x1.device == 'cpu' else cp.matmul(grad.transpose(0,2,1), x1.data).sum(axis=0)
-
+                    x2.grad = atom.zeros_like(x2, x2.device)
+                    x2.grad += atom(np.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0)) if x1.device == 'cpu' else atom(cp.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0))
             else:
-                if grad.shape == (2, 3, 3):
-                    print('DEBUG')
-
                 if x1_shape == x2_shape:
                     if x1.requires_grad:
-                        x1.grad += np.matmul(grad, x2.data) if x1.device == 'cpu' else cp.matmul(grad, x2.data)
+                        x1.grad = atom.zeros_like(x1, x1.device)
+                        if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data)
+                        else: propagate_grad = cp.matmul(grad.data, x2.data)
+                        x1.grad += atom(propagate_grad)
                     if x2.requires_grad:
-                        x2.grad += np.matmul(x1.data.transpose(0,2,1), grad).transpose(0,2,1) if x1.device == 'cpu' else cp.matmul(x1.data.transpose(0,2,1), grad).transpose(0,2,1)
+                        x2.grad = atom.zeros_like(x2, x2.device)
+                        if x2.device == 'cpu': propagate_grad = np.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
+                        else: propagate_grad = cp.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
+                        x2.grad += atom(propagate_grad)
                 else:
                     if x1.requires_grad:
-                        x1.grad += np.matmul(grad, x2.data.transpose(0,2,1)) if x1.device == 'cpu' else cp.matmul(grad, x2.data.transpose(0,2,1))
+                        x1.grad = atom.zeros_like(x1, x1.device)
+                        if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.transpose(0,2,1))
+                        else: propagate_grad = cp.matmul(grad.data, x2.data.transpose(0,2,1))
+                        x1.grad += atom(propagate_grad)
                     if x2.requires_grad:
-                        x2.grad += np.matmul(grad.transpose(0,2,1), x1.data).transpose(0,2,1) if x1.device == 'cpu' else cp.matmul(grad.transpose(0,2,1), x1.data).transpose(0,2,1)
+                        x2.grad = atom.zeros_like(x2, x2.device)
+                        if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
+                        else: propagate_grad = cp.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
+                        x2.grad += atom(propagate_grad)
 
         out = atom(result, requires_grad=requires_grad, device=x1.device, depends_on=(x1, x2), operation='@', grad_fn=grad_fn)
     
@@ -193,9 +205,9 @@ class atom:
                 ret = f"tensor({self.data.round(4)}, device='{self.device}', requires_grad={self.requires_grad})"
         else:
             if len(self.shape) == 0:
-                ret = f"tensor({self.data:.4f}, device='{self.device}'"
+                ret = f"tensor({self.data:.4f}, device='{self.device}')"
             else:
-                ret = f"tensor({self.data.round(4)}, device='{self.device}'"
+                ret = f"tensor({self.data.round(4)}, device='{self.device}')"
 
         return ret
 
@@ -315,11 +327,18 @@ class atom:
             if self.requires_grad:
                 self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == grad.ndim:
-                    deriv = np.where(out.data > 0, 1, 0) * grad.data if self.device == 'cpu' else cp.where(self.data > 0, 1, 0) * grad.data
+                    if self.device == 'cpu':
+                        deriv = np.where(out.data > 0, 1, 0) * grad.data
+                    else:
+                        deriv = cp.where(out.data > 0, 1, 0) * grad.data
                     grad_propagated = atom(deriv, self.device)
                     self.grad += grad_propagated
                 else:
-                    deriv = np.where(out.data > 0, 1, 0) * np.sum(grad.data, axis=-1) if self.device == 'cpu' else cp.where(out.data > 0, 1, 0) * cp.sum(grad.data, axis=-1)
+                    if self.device == 'cpu':
+                        deriv = np.where(out.data > 0, 1, 0) * np.sum(grad.data, axis=-1)
+                    else:
+                        deriv = cp.where(out.data > 0, 1, 0) * cp.sum(grad.data, axis=-1)
+
                     grad_propagated = atom(deriv, self.device)
                     self.grad += grad_propagated
 
@@ -350,6 +369,11 @@ class atom:
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
         return atom(self.data.T, self.device, self.requires_grad)
     
+    def transpose(self, dim1, dim2):
+            data = self.data.transpose(0, dim1, dim2)
+
+            return atom(data, device=self.device, requires_grad=self.requires_grad)
+
     def zeros_like(atom_tensor, device):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
         result = np.zeros_like(atom_tensor.data) if device == 'cpu' else cp.zeros_like(atom_tensor.data)
@@ -378,7 +402,8 @@ class atom:
         for node in reversed(topo):
             if node._grad_fn is not None:
                 if node._operation == 'cross_entropy':
-                    cross_entropy_grad = node._depends_on[0].softmax(dim=-1) - node._depends_on[1]
+                    if grad is None: cross_entropy_grad = node._depends_on[0].softmax(dim=-1) - node._depends_on[1]
+                    else: cross_entropy_grad = grad
                     node._grad_fn(cross_entropy_grad)
                 else:
                     node._grad_fn(node.grad)
