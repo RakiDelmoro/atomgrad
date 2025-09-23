@@ -1,55 +1,12 @@
 import torch
 import numpy as np
+import cupy as cp
 from tensor import atom
 import nn 
-
-# Colors
-RED = '\033[31m'
-RESET = '\033[0m'
-GREEN = '\033[32m'
-
-def test_zeros():
-    try:
-        atom.zeros((2, 3), device='cuda', requires_grad=True)
-        atom.zeros((2, 3), device='cpu', requires_grad=False)
-        print(f'Test generate array of zeros --> {GREEN}Pass!{RESET}')
-    except:
-        print(f'Test generate array of zeros --> {RED}Failed!{RESET}')
-
-def test_empty():
-    try:
-        atom.empty((2, 3), device='cpu')
-        atom.empty((2, 3), device='cuda')
-        print(f'Test generate random value in array --> {GREEN}Pass!{RESET}')
-    except:
-        print(f'Test generate random value in array --> {RED}Failed!{RESET}')
-
-def test_add_ops():
-    x1_cuda = atom.zeros((2, 3), device='cuda')
-    x2_cuda = atom.ones((2, 3), device='cuda')
-
-    x1_cpu = atom.zeros((2, 3), device='cpu')
-    x2_cpu = atom.ones((2, 3), device='cpu')
-
-    try:
-        x1_cuda + x2_cuda
-        x2_cuda + x1_cuda
-        x1_cpu + x2_cpu
-        x2_cpu + x1_cpu
-        print(f'Test adding two arrays --> {GREEN}Pass!{RESET}')
-    except:
-        print(f'Test adding two arrays --> {RED}Failed!{RESET}')
 
 def test_matmul_for_2d():
     x1_atom = atom.randn((2, 3), device='cpu')
     x2_atom = atom.randn((3, 2), device='cpu')
-
-    # Check if it has error
-    try:
-        atom.matmul(x1_atom, x2_atom)
-        print(f'Test if matmul works --> {GREEN}Pass!{RESET}')
-    except:
-        print(f'Test if matmtul works --> {RED}Failed!{RESET}')
 
     # Comparing Torch and Atom
     x1_torch = torch.tensor(x1_atom.data, dtype=torch.float32)
@@ -58,12 +15,19 @@ def test_matmul_for_2d():
     y_atom = atom.matmul(x1_atom, x2_atom)
     y_torch = torch.matmul(x1_torch, x2_torch)
 
-    satisfied = np.allclose(y_atom.data, y_torch.numpy())
+    assert np.allclose(y_atom.data, y_torch.numpy())
 
-    if satisfied:
-        print(f'Comparing matmul ops of Torch and Atom --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'Comparing matmul ops of Torch and Atom --> {RED}Failed!{RESET}')
+def test_matmul_for_3d():
+    x1_atom = atom.randn((2, 3, 10))
+    x2_atom = atom.randn((10, 5))
+
+    x1_torch = torch.tensor(x1_atom.data, dtype=torch.float32)
+    x2_torch = torch.tensor(x2_atom.data, dtype=torch.float32)
+
+    y_atom = atom.matmul(x1_atom, x2_atom)
+    y_torch = torch.matmul(x1_torch, x2_torch)
+    
+    assert np.allclose(y_atom.data, y_torch.numpy())
 
 def test_relu():
     x_atom = atom.randn((2, 5))
@@ -74,10 +38,7 @@ def test_relu():
 
     satified = np.allclose(y_atom.data, y_torch.numpy())
 
-    if satified:
-        print(f'ReLu test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'ReLu test --> {RED}Failed!{RESET}')
+    assert satified
 
 def test_softmax():
     x_atom = atom.randn((2, 5))
@@ -88,10 +49,7 @@ def test_softmax():
 
     satified = np.allclose(y_atom.data, y_torch.numpy())
 
-    if satified:
-        print(f'Softmax test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'Softmax test --> {RED}Failed!{RESET}')
+    assert satified
 
 def test_log_softmax():
     x_atom = atom.randn((2, 5))
@@ -100,12 +58,7 @@ def test_log_softmax():
     y_atom = x_atom.log_softmax(dim=-1) 
     y_torch = x_torch.log_softmax(dim=-1)
 
-    satified = np.allclose(y_atom.data, y_torch.numpy())
-
-    if satified:
-        print(f'Log Softmax test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'Log Softmax test --> {RED}Failed!{RESET}')
+    assert np.allclose(y_atom.data, y_torch.numpy())
 
 def test_one_hot():
     x_atom = atom.randint(0, 5, size=(2,))
@@ -114,12 +67,7 @@ def test_one_hot():
     y_atom = x_atom.one_hot(num_classes=5)
     y_torch = torch.nn.functional.one_hot(x_torch, num_classes=5)
 
-    satified = np.allclose(y_atom.data, y_torch.numpy())
-
-    if satified:
-        print(f'One hot test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'One hot test --> {RED}Failed!{RESET}')
+    assert np.allclose(y_atom.data, y_torch.numpy())
 
 def test_cross_entropy():
     # DATASET
@@ -149,10 +97,7 @@ def test_cross_entropy():
     model_output_grad_satisfied = np.allclose((x_atom.grad / BATCH).data, x_torch.grad.detach().numpy())
     loss_fn_satisfied = np.allclose(atom_loss.data, torch_loss.detach().numpy())
 
-    if model_output_grad_satisfied and loss_fn_satisfied:
-        print(f'CrossEntropy Loss test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'CrossEntropy Loss test --> {RED}Failed!{RESET}')
+    assert model_output_grad_satisfied and loss_fn_satisfied
 
 def test_1_layer_linear_ops():
     # Dataset
@@ -193,10 +138,7 @@ def test_1_layer_linear_ops():
     weight_grad_satisfied = np.allclose((atom_w.grad / BATCH_SIZE).data, torch_ln.weight.grad.T.numpy())
     bias_grad_satisfied = np.allclose((atom_b.grad / BATCH_SIZE).data,  torch_ln.bias.grad.numpy())
 
-    if weight_grad_satisfied and bias_grad_satisfied:
-        print(f'One linear layer test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'One linear layer test --> {RED}Failed!{RESET}')
+    assert weight_grad_satisfied and bias_grad_satisfied
 
 def test_2_layer_linear_ops():
     # Dataset
@@ -211,7 +153,6 @@ def test_2_layer_linear_ops():
 
     # Torch Configs
     torch_ln_1 = torch.nn.Linear(INPUT_DIM, HIDDEN_DIM)
-    torch_act = torch.nn.ReLU()
     torch_ln_2 = torch.nn.Linear(HIDDEN_DIM, OUTPUT_DIM)
     torch_loss_fn = torch.nn.CrossEntropyLoss()
 
@@ -246,10 +187,7 @@ def test_2_layer_linear_ops():
     weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy())
     bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy())
 
-    if weight_grad_satisfied and bias_grad_satisfied:
-        print(f'Two linear layer test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'Two linear layer test --> {RED}Failed!{RESET}')
+    assert weight_grad_satisfied and bias_grad_satisfied
 
 def test_2_layer_with_act_linear_ops():
     # Dataset
@@ -306,20 +244,61 @@ def test_2_layer_with_act_linear_ops():
     weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy())
     bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy())
 
-    if weight_grad_satisfied and bias_grad_satisfied:
-        print(f'Two linear layer with activation test --> {GREEN}Pass!{RESET}')
-    else:
-        print(f'Two linear layer with activation test --> {RED}Failed!{RESET}')
+    assert weight_grad_satisfied and bias_grad_satisfied
 
-# test_zeros()
-# test_empty()
-# test_add_ops()
-# test_matmul_for_2d()
-test_softmax()
-test_relu()
-test_log_softmax()
-test_one_hot()
-test_cross_entropy()
-test_1_layer_linear_ops()
-test_2_layer_linear_ops()
-test_2_layer_with_act_linear_ops()
+# def test_self_attention():
+#     BATCH = 2
+#     SEQ_LEN = 5 
+#     EMBEDDING_DIM = 16
+
+#     torch_x_emb = torch.randn(BATCH, SEQ_LEN, EMBEDDING_DIM)
+#     atom_x_emb = atom(torch_x_emb.numpy(), requires_grad=True)
+
+#     torch_y = torch.randint(low=0, high=EMBEDDING_DIM, size=(BATCH*SEQ_LEN,))
+#     atom_y = atom(torch_y.numpy())
+
+#     torch_tril = torch.tril(torch.ones((SEQ_LEN, SEQ_LEN)))
+#     atom_tril = atom(torch_tril.numpy())
+
+#     torch_loss_fn = torch.nn.CrossEntropyLoss()
+#     atom_loss_fn = nn.cross_entropy()
+
+#     torch_q_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+#     torch_k_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+#     torch_v_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+
+#     atom_q_proj, q_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[torch_q_proj.weight.T.detach().numpy(), torch_q_proj.bias.detach().numpy()])
+#     atom_k_proj, k_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[torch_k_proj.weight.T.detach().numpy(), torch_k_proj.bias.detach().numpy()])
+#     atom_v_proj, v_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[torch_v_proj.weight.T.detach().numpy(), torch_v_proj.bias.detach().numpy()])
+
+#     torch_query = torch_q_proj(torch_x_emb)
+#     torch_key = torch_k_proj(torch_x_emb)
+#     torch_value = torch_v_proj(torch_x_emb)
+
+#     torch_qk_matmul = torch.matmul(torch_query, torch_key.transpose(-2, -1))
+#     torch_scale = torch_qk_matmul * EMBEDDING_DIM**-0.5
+#     torch_mask = torch_scale.masked_fill(torch_tril[:SEQ_LEN, :SEQ_LEN] == 0, float('-inf'))
+#     torch_softmax = torch.nn.functional.softmax(torch_mask, dim=-1)
+#     torch_softmax_v_matmul = torch.matmul(torch_softmax, torch_value)
+
+#     torch_loss = torch_loss_fn(torch_softmax_v_matmul.view(BATCH*SEQ_LEN, EMBEDDING_DIM), torch_y)
+
+#     atom_query = atom_q_proj(atom_x_emb)
+#     atom_key = atom_k_proj(atom_x_emb)
+#     atom_value = atom_v_proj(atom_x_emb)
+
+#     atom_qk_matmul = atom.matmul(atom_query, atom_key.transpose(2, 1))
+#     atom_scale = atom_qk_matmul * atom(EMBEDDING_DIM**-0.5)
+#     mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0
+#     atom_scale.data[:, mask] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
+#     atom_softmax = atom_scale.softmax(dim=-1)
+#     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value)
+#     atom_softmax_v_matmul.data = atom_softmax_v_matmul.data.reshape(BATCH*SEQ_LEN, EMBEDDING_DIM)
+#     atom_softmax_v_matmul.shape = atom_softmax_v_matmul.data.shape
+#     atom_loss = atom_loss_fn(atom_softmax_v_matmul, atom_y)
+#     # atom_loss.backward() # TODO: Fix bug
+
+#     print(torch_loss)
+#     print(atom_loss)
+
+# test_self_attention()
