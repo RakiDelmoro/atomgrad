@@ -92,6 +92,13 @@ def relu():
     
     return forward
 
+def softmax():
+    
+    def forward(atom_tensor):
+        return atom_tensor.softmax(dim=-1)
+    
+    return forward
+
 ''' LOSS Function'''
 def cross_entropy():
 
