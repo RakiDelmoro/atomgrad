@@ -106,6 +106,16 @@ def cross_entropy():
         assert model_output.data.dtype in [cp.float32, np.float32], f'model output should have float32 dtype, got {model_output.data.dtype}'
         assert expected_output.data.dtype in [cp.float32, np.float32], f'model output should have float32 dtype, got {expected_output.data.dtype}'
 
+        if expected_output.ndim == 1:
+            zeros_arr = np.zeros(model_output.shape) if model_output.device == 'cpu' else cp.zeros(model_output.shape)
+            arrange = np.arange(len(model_output.data)) if model_output.device == 'cpu' else cp.arange(len(model_output.data))
+            data_type = np.longlong if model_output.device == 'cpu' else cp.longlong
+            zeros_arr[arrange, expected_output.data.astype(data_type)] = 1
+            expected_output.data = zeros_arr
+            expected_output.shape = zeros_arr.shape
+        else:
+            expected_output = expected_output
+
         if model_output.device == 'cpu':
             avg_loss = -np.mean(np.sum((expected_output * model_output.log_softmax(dim=-1)).data, axis=-1))
         else:
