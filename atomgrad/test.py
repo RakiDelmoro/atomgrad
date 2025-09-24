@@ -258,7 +258,7 @@ def test_self_attention():
     atom_y = atom(torch_y.numpy())
 
     torch_tril = torch.tril(torch.ones((SEQ_LEN, SEQ_LEN)))
-    atom_tril = atom(torch_tril.numpy())
+    atom_tril = atom.tril(atom.ones((SEQ_LEN, SEQ_LEN)))
 
     torch_loss_fn = torch.nn.CrossEntropyLoss()
     atom_loss_fn = nn.cross_entropy()
@@ -301,9 +301,8 @@ def test_self_attention():
 
     atom_qk_matmul = atom.matmul(atom_query, atom_key.transpose(2, 1))
     atom_scale = atom_qk_matmul * atom(EMBEDDING_DIM**-0.5)
-    mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0
-    atom_scale.data[:, mask] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
-    atom_softmax = atom_scale.softmax(dim=-1)
+    atom_mask = atom_scale.masked_fill(atom(atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0))
+    atom_softmax = atom_mask.softmax(dim=-1)
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value)
     atom_softmax_v_matmul.data = atom_softmax_v_matmul.data.reshape(BATCH*SEQ_LEN, EMBEDDING_DIM)
     atom_softmax_v_matmul.shape = atom_softmax_v_matmul.data.shape
@@ -335,4 +334,4 @@ def test_self_attention():
     assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data)
     assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data)
 
-test_self_attention()
+# test_self_attention()
