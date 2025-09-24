@@ -288,6 +288,29 @@ class atom:
         ret = atom(arr, device=device, requires_grad=requires_grad)
 
         return ret
+
+    @staticmethod
+    def ones(shape: Iterable[int], device='cpu', requires_grad=False):
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+
+        ret = np.ones(shape) if device == 'cpu' else cp.ones(shape)
+
+        return atom(ret, device=device, requires_grad=requires_grad)
+    
+    @staticmethod
+    def tril(atom_tensor, k=0):
+        assert atom_tensor.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {atom_tensor.device}'
+
+        ret = np.tril(atom_tensor.data, k) if atom_tensor.device == 'cpu' else cp.tril(atom_tensor.data, k)
+
+        return atom(ret, atom_tensor.device, requires_grad=atom_tensor.requires_grad)
+    
+    def masked_fill(self, mask):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        self.data[:, (mask.data == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+
+        return self
     
     def softmax(self, dim):
         device = self.device
