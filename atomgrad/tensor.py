@@ -31,17 +31,17 @@ class atom:
 
         def grad_fn(grad):
             if self.requires_grad:
-                self.grad = cp.zeros_like(self.shape) if self.device == 'cuda' else np.zeros_like(self.shape)
+                self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == 1:
                     self.grad += cp.sum(cp.sum(grad.data * other.data, axis=0), axis=0) if self.device == 'cuda' else np.sum(np.sum(grad.data * other.data, axis=0), axis=0)
                 if self.ndim == grad.ndim:
                     self.grad += atom(grad.data * other.data, self.device)
 
             if other.requires_grad:
-                other.grad = cp.zeros_like(self.shape) if self.device == 'cuda' else np.zeros_like(self.shape)
+                other.grad = atom.zeros_like(other, other.device)
                 other.grad += atom(grad * self.data, self.device)
 
-        out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='+', grad_fn=grad_fn)
+        out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='*', grad_fn=grad_fn)
 
         return out
 
@@ -300,18 +300,20 @@ class atom:
         sum_exp = np.sum(exp, axis=dim, keepdims=True)
         applied_softmax = exp / sum_exp
 
-        out = atom(applied_softmax, self.device, self.requires_grad, self._depends_on)
+        out = atom(applied_softmax, self.device, self.requires_grad, [self,], 'softmax')
 
         def grad_fn(grad):
             if self.requires_grad:
-                self.grad = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
+                self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == grad.ndim:
                     sum_term = (out.data * grad.data).sum(axis=dim, keepdims=True)
-                    self.grad += out.data * (grad.data - sum_term)
+                    deriv = out.data * (grad.data - sum_term)
+                    self.grad += atom(deriv, self.device)
                 else:
                     grad = np.sum(grad.data, axis=-1)
-                    sum_term = (out.data * grad.data).sum(axis=dim, keepdims=True)
-                    self.grad += out.data * (grad.data - sum_term)
+                    sum_term = (out.data * grad).sum(axis=dim, keepdims=True)
+                    deriv = out.data * (grad - sum_term)
+                    self.grad += atom(deriv, self.device)
 
         out._grad_fn = grad_fn
         return out
@@ -321,7 +323,7 @@ class atom:
 
         # Relu
         applied_relu = np.maximum(0, self.data) if self.device == 'cpu' else cp.maximum(0, self.data)
-        out = atom(applied_relu, self.device, self.requires_grad, [self,])
+        out = atom(applied_relu, self.device, self.requires_grad, [self,], 'relu')
 
         def grad_fn(grad):
             if self.requires_grad:
@@ -371,8 +373,14 @@ class atom:
     
     def transpose(self, dim1, dim2):
             data = self.data.transpose(0, dim1, dim2)
+            def grad_fn(grad):
+                if self.requires_grad:
+                    self.grad = atom.zeros_like(self, self.device)
+                    grad.data = grad.data.transpose(0, dim1, dim2)
+                    grad.shape = grad.data.shape
+                    self.grad += grad
 
-            return atom(data, device=self.device, requires_grad=self.requires_grad)
+            return atom(data, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='transpose', grad_fn=grad_fn)
 
     def zeros_like(atom_tensor, device):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
