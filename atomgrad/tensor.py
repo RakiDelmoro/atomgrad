@@ -53,6 +53,11 @@ class atom:
         result = self.data + other.data
 
         def grad_fn(grad):
+            if self.ndim != grad.ndim:
+                grad.data = grad.data.reshape(self.shape)
+                grad.shape = grad.data.shape
+                grad.ndim = grad.data.ndim
+
             if self.requires_grad:
                 self.grad = atom.zeros_like(self, self.device)
                 dim_diff = grad.ndim - self.grad.ndim
@@ -125,7 +130,7 @@ class atom:
             elif x1_ndim == 3 and x2_ndim != 3:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device)
-                    x1.grad += atom.matmul(grad, x2)
+                    x1.grad += atom.matmul(grad, x2.T())
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device)
                     x2.grad += atom(np.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0)) if x1.device == 'cpu' else atom(cp.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0))
