@@ -266,10 +266,12 @@ def test_self_attention():
     torch_q_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
     torch_k_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
     torch_v_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+    torch_ln_attn_out = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
 
     atom_q_proj, q_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_q_proj.weight.T.detach().numpy(), requires_grad=True), atom(torch_q_proj.bias.detach().numpy(), requires_grad=True)])
     atom_k_proj, k_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_k_proj.weight.T.detach().numpy(), requires_grad=True), atom(torch_k_proj.bias.detach().numpy(), requires_grad=True)])
     atom_v_proj, v_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_v_proj.weight.T.detach().numpy(), requires_grad=True), atom(torch_v_proj.bias.detach().numpy(), requires_grad=True)])
+    atom_ln_attn_out, atom_ln_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_ln_attn_out.weight.T.detach().numpy(), requires_grad=True), atom(torch_ln_attn_out.bias.detach().numpy(), requires_grad=True)])
 
     # TORCH forward pass
     torch_query = torch_q_proj(torch_x_emb)
@@ -281,8 +283,9 @@ def test_self_attention():
     torch_mask = torch_scale.masked_fill(torch_tril[:SEQ_LEN, :SEQ_LEN] == 0, float('-inf'))
     torch_softmax = torch.nn.functional.softmax(torch_mask, dim=-1)
     torch_softmax_v_matmul = torch.matmul(torch_softmax, torch_value)
+    torch_attention_out = torch_ln_attn_out(torch_softmax_v_matmul)
 
-    torch_loss = torch_loss_fn(torch_softmax_v_matmul.view(BATCH*SEQ_LEN, EMBEDDING_DIM), torch_y)
+    torch_loss = torch_loss_fn(torch_attention_out.view(BATCH*SEQ_LEN, EMBEDDING_DIM), torch_y)
 
     # Tell pytorch to retain gradient on each forward pass calculcation
     torch_query.retain_grad()
@@ -293,6 +296,7 @@ def test_self_attention():
     torch_key.retain_grad()
     torch_softmax.retain_grad()
     torch_softmax_v_matmul.retain_grad()
+    torch_attention_out.retain_grad()
 
     # ATOM forward pass
     atom_query = atom_q_proj(atom_x_emb)
@@ -304,10 +308,12 @@ def test_self_attention():
     atom_mask = atom_scale.masked_fill(atom(atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0))
     atom_softmax = atom_mask.softmax(dim=-1)
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value)
-    atom_softmax_v_matmul.data = atom_softmax_v_matmul.data.reshape(BATCH*SEQ_LEN, EMBEDDING_DIM)
-    atom_softmax_v_matmul.shape = atom_softmax_v_matmul.data.shape
+    atom_attention_out = atom_ln_attn_out(atom_softmax_v_matmul)
+
+    atom_attention_out.data = atom_attention_out.data.reshape(BATCH*SEQ_LEN, EMBEDDING_DIM)
+    atom_attention_out.shape = atom_attention_out.data.shape
     
-    atom_loss = atom_loss_fn(atom_softmax_v_matmul, atom_y)
+    atom_loss = atom_loss_fn(atom_attention_out, atom_y)
 
     torch_loss.backward()
     atom_loss.backward()
@@ -333,5 +339,6 @@ def test_self_attention():
     # Value projection parameters
     assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data)
     assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data)
-
-# test_self_attention()
+    # Attention linear layer parameters
+    assert np.allclose(torch_ln_attn_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data)
+    assert np.allclose(torch_ln_attn_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data)
