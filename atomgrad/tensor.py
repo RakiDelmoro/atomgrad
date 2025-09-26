@@ -58,6 +58,11 @@ class atom:
                 grad.shape = grad.data.shape
                 grad.ndim = grad.data.ndim
 
+            if self.ndim == grad.ndim:
+                if self.shape != grad.shape:
+                    grad.data = grad.data.reshape(self.shape)
+                    grad.shape = grad.data.shape
+
             if self.requires_grad:
                 self.grad = atom.zeros_like(self, self.device)
                 dim_diff = grad.ndim - self.grad.ndim
@@ -120,13 +125,20 @@ class atom:
             if x1.ndim != grad.ndim and x2.ndim != grad.ndim:
                 grad.data = grad.data.reshape(x2.shape)
 
-            if x1_ndim != 3 and x2_ndim != 3:
+            if x1_ndim == 4 and x2_ndim == 4:
+                if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device)
+                    x1.grad += atom.matmul(grad, x2.transpose((0, 1, 3, 2)))
+                if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device)
+                    x2.grad += atom.matmul(grad.transpose((0, 1, 3, 2)), x1).transpose((0, 1, 3, 2))
+            elif x1_ndim == 4 and x2_ndim == 2:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device)
                     x1.grad += atom.matmul(grad, x2.T())
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device)
-                    x2.grad += atom.matmul(grad.T(), x1).T()
+                    x2.grad += atom(np.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0)) if x1.device == 'cpu' else atom(cp.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0))
             elif x1_ndim == 3 and x2_ndim != 3:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device)
@@ -134,29 +146,40 @@ class atom:
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device)
                     x2.grad += atom(np.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0)) if x1.device == 'cpu' else atom(cp.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0))
-            else:
-                if x1_shape == x2_shape:
-                    if x1.requires_grad:
-                        x1.grad = atom.zeros_like(x1, x1.device)
-                        if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data)
-                        else: propagate_grad = cp.matmul(grad.data, x2.data)
-                        x1.grad += atom(propagate_grad)
-                    if x2.requires_grad:
-                        x2.grad = atom.zeros_like(x2, x2.device)
-                        if x2.device == 'cpu': propagate_grad = np.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
-                        else: propagate_grad = cp.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
-                        x2.grad += atom(propagate_grad)
-                else:
-                    if x1.requires_grad:
-                        x1.grad = atom.zeros_like(x1, x1.device)
-                        if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.transpose(0,2,1))
-                        else: propagate_grad = cp.matmul(grad.data, x2.data.transpose(0,2,1))
-                        x1.grad += atom(propagate_grad)
-                    if x2.requires_grad:
-                        x2.grad = atom.zeros_like(x2, x2.device)
-                        if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
-                        else: propagate_grad = cp.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
-                        x2.grad += atom(propagate_grad)
+            elif x1_ndim == 2 and x2_ndim == 2:
+                if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device)
+                    if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.T)
+                    else: propagate_grad = cp.matmul(grad.data, x2.data.transpose(0,2,1))
+                    x1.grad += atom(propagate_grad)
+                if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device)
+                    if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.T, x1.data).T
+                    else: propagate_grad = cp.matmul(grad.data.T, x1.data).T
+                    x2.grad += atom(propagate_grad)
+            # else:
+            #     if x1_shape == x2_shape:
+            #         if x1.requires_grad:
+            #             x1.grad = atom.zeros_like(x1, x1.device)
+            #             if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data)
+            #             else: propagate_grad = cp.matmul(grad.data, x2.data)
+            #             x1.grad += atom(propagate_grad)
+            #         if x2.requires_grad:
+            #             x2.grad = atom.zeros_like(x2, x2.device)
+            #             if x2.device == 'cpu': propagate_grad = np.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
+            #             else: propagate_grad = cp.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
+            #             x2.grad += atom(propagate_grad)
+            #     else:
+            #         if x1.requires_grad:
+            #             x1.grad = atom.zeros_like(x1, x1.device)
+            #             if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.transpose(0,2,1))
+            #             else: propagate_grad = cp.matmul(grad.data, x2.data.transpose(0,2,1))
+            #             x1.grad += atom(propagate_grad)
+            #         if x2.requires_grad:
+            #             x2.grad = atom.zeros_like(x2, x2.device)
+            #             if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
+            #             else: propagate_grad = cp.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
+                        # x2.grad += atom(propagate_grad)
 
         out = atom(result, requires_grad=requires_grad, device=x1.device, depends_on=(x1, x2), operation='@', grad_fn=grad_fn)
     
@@ -399,16 +422,31 @@ class atom:
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
         return atom(self.data.T, self.device, self.requires_grad)
     
-    def transpose(self, dim1, dim2):
-            data = self.data.transpose(0, dim1, dim2)
+    def transpose(self, dims=Iterable[int]):
+            result = self.data.transpose(dims)
             def grad_fn(grad):
                 if self.requires_grad:
-                    self.grad = atom.zeros_like(self, self.device)
-                    grad.data = grad.data.transpose(0, dim1, dim2)
-                    grad.shape = grad.data.shape
+                    self.grad = atom.zeros_like(result, self.device)
+
                     self.grad += grad
 
-            return atom(data, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='transpose', grad_fn=grad_fn)
+            return atom(result, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='transposed', grad_fn=grad_fn)
+    
+    def reshape(self, shape=Iterable[int]):
+        result = self.data.reshape(shape)
+        
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(result, self.device)
+                
+                if grad.shape != self.grad.shape:
+                    grad.data = grad.data.transpose(0, 1, 3, 2)
+                    grad.shape = grad.data.shape
+                    grad.ndim = grad.data.ndim
+
+                self.grad += grad
+
+        return atom(result, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='reshaped', grad_fn=grad_fn)
 
     def zeros_like(atom_tensor, device):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
