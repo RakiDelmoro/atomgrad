@@ -39,7 +39,7 @@ class atom:
 
             if other.requires_grad:
                 other.grad = atom.zeros_like(other, other.device)
-                other.grad += atom(grad * self.data, self.device)
+                other.grad += grad * self
 
         out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='*', grad_fn=grad_fn)
 
@@ -157,29 +157,6 @@ class atom:
                     if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.T, x1.data).T
                     else: propagate_grad = cp.matmul(grad.data.T, x1.data).T
                     x2.grad += atom(propagate_grad)
-            # else:
-            #     if x1_shape == x2_shape:
-            #         if x1.requires_grad:
-            #             x1.grad = atom.zeros_like(x1, x1.device)
-            #             if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data)
-            #             else: propagate_grad = cp.matmul(grad.data, x2.data)
-            #             x1.grad += atom(propagate_grad)
-            #         if x2.requires_grad:
-            #             x2.grad = atom.zeros_like(x2, x2.device)
-            #             if x2.device == 'cpu': propagate_grad = np.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
-            #             else: propagate_grad = cp.matmul(x1.data.transpose(0,2,1), grad.data).transpose(0,2,1)
-            #             x2.grad += atom(propagate_grad)
-            #     else:
-            #         if x1.requires_grad:
-            #             x1.grad = atom.zeros_like(x1, x1.device)
-            #             if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.transpose(0,2,1))
-            #             else: propagate_grad = cp.matmul(grad.data, x2.data.transpose(0,2,1))
-            #             x1.grad += atom(propagate_grad)
-            #         if x2.requires_grad:
-            #             x2.grad = atom.zeros_like(x2, x2.device)
-            #             if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
-            #             else: propagate_grad = cp.matmul(grad.data.transpose(0,2,1), x1.data).transpose(0,2,1)
-                        # x2.grad += atom(propagate_grad)
 
         out = atom(result, requires_grad=requires_grad, device=x1.device, depends_on=(x1, x2), operation='@', grad_fn=grad_fn)
     
@@ -397,6 +374,93 @@ class atom:
 
         out._grad_fn = grad_fn
         return out
+    
+    def embeddings_(self, parameters):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        if self.device == 'cpu':
+            if np.any(self.data < 0) or np.any(self.data >= parameters.shape[0]):
+                raise ValueError(f"Indices out of range [0, {self.shape[0]-1}]")
+        else:
+            if cp.any(self.data < 0) or cp.any(self.data >= parameters.shape[0]):
+                raise ValueError(f"Indices out of range [0, {self.shape[0]-1}]")
+            
+        result = atom(parameters.data[self.data.astype(int)], self.device, requires_grad=True, depends_on=[parameters,], operation='embeddings')
+
+        def grad_fn(grad):
+            parameters.grad = atom.zeros_like(parameters, parameters.device)
+
+            if self.ndim == 2:
+                indices = self.data.astype(int).reshape(-1)
+            else:
+                indices = self.data.astype(int)
+            
+            one_hot = atom(np.eye(parameters.shape[0], dtype=grad.data.dtype)[indices]) if self.device == 'cpu' else atom(cp.eye(parameters.shape[0], dtype=grad.data.dtype)[indices])
+            if grad.ndim > 2:
+                grad.data = grad.data.reshape(-1, grad.shape[-1])
+                grad.shape = grad.data.shape
+                grad.ndim = grad.data.ndim
+                propagate_grad = atom.matmul(one_hot.T(), grad)
+                parameters.grad += propagate_grad
+            else:
+                parameters.grad += grad
+
+        result._grad_fn = grad_fn
+        return result
+    
+    def layer_norm_(self, eps):
+        mean = self.data.mean(axis=-1, keepdims=True)
+        std = self.data.std(axis=-1, keepdims=True)
+        centered = self.data - mean
+        denominator = std + eps
+
+        result = atom((centered / denominator), self.device, requires_grad=True, depends_on=[self,], operation='layer_norm')
+
+        def grad_fn(grad):
+            mean_grad = grad.data.mean(axis=-1, keepdims=True)
+            sum_grad_centered = (grad.data * centered).sum(axis=-1, keepdims=True)     
+            term1 = (grad.data - mean_grad) / denominator
+            term2 = centered * sum_grad_centered / (result.data.shape[-1] * std * denominator**2)
+
+            self.grad += atom(term1 - term2)
+        
+        result._grad_fn = grad_fn
+        return result
+    
+    def dropout_(self, prob, train=True):
+        mask = None
+        scale = 1.0
+
+        if train and prob != 0:
+            if prob == 1:
+                mask = cp.zeros(self.shape, dtype=cp.bool_) if self.device == 'cuda' else np.zeros(self.shape, dtype=np.bool_)
+                dropped_out = atom.zeros_like(self, self.device)
+            else:
+                mask = cp.random.rand(*self.shape) > prob if self.device == 'cuda' else np.random.rand(*self.shape) > prob
+                scale = 1.0 / (1.0 - prob)
+                dropped_out = mask * self.data * scale
+            result = atom(dropped_out, requires_grad=True)
+        else:
+            result = self
+            if train and prob == 0:
+                mask = cp.ones(self.shape, dtype=cp.bool_) if self.device == 'cuda' else np.ones(self.shape, dtype=np.bool_)
+
+        result._depends_on = [self,]
+
+        def grad_fn(grad):
+            self.grad = atom.zeros_like(self, self.device)
+            if train:
+                if prob == 1:
+                    propagated_grad = atom.zeros_like(self, self.device)
+                else:
+                    propagated_grad = atom(grad.data * mask * scale)
+            else:
+                propagated_grad = grad
+
+            self.grad += propagated_grad
+
+        result._grad_fn = grad_fn
+        return result
 
     def log_softmax(self, dim):
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
