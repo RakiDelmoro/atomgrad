@@ -248,8 +248,10 @@ def test_2_layer_with_act_linear_ops():
 
 def test_self_attention():
     BATCH = 2
-    SEQ_LEN = 5 
+    SEQ_LEN = 5
+    NUM_HEADS = 1
     EMBEDDING_DIM = 16
+    HEAD_DIM = EMBEDDING_DIM // 1
 
     torch_x_emb = torch.randn(BATCH, SEQ_LEN, EMBEDDING_DIM)
     atom_x_emb = atom(torch_x_emb.numpy(), requires_grad=True)
@@ -274,11 +276,12 @@ def test_self_attention():
     atom_ln_attn_out, atom_ln_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_ln_attn_out.weight.T.detach().numpy(), requires_grad=True), atom(torch_ln_attn_out.bias.detach().numpy(), requires_grad=True)])
 
     # TORCH forward pass
-    torch_query = torch_q_proj(torch_x_emb)
-    torch_key = torch_k_proj(torch_x_emb)
-    torch_value = torch_v_proj(torch_x_emb)
+    torch_query = torch_q_proj(torch_x_emb).reshape(BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+    torch_key = torch_k_proj(torch_x_emb).reshape(BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+    torch_value = torch_v_proj(torch_x_emb).reshape(BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM)
     
-    torch_qk_matmul = torch.matmul(torch_query, torch_key.transpose(-2, -1))
+    torch_key_transposed = torch_key.transpose(-2, -1)
+    torch_qk_matmul = torch.matmul(torch_query, torch_key_transposed)
     torch_scale = torch_qk_matmul * EMBEDDING_DIM**-0.5
     torch_mask = torch_scale.masked_fill(torch_tril[:SEQ_LEN, :SEQ_LEN] == 0, float('-inf'))
     torch_softmax = torch.nn.functional.softmax(torch_mask, dim=-1)
@@ -291,6 +294,7 @@ def test_self_attention():
     torch_query.retain_grad()
     torch_key.retain_grad()
     torch_value.retain_grad()
+    torch_key_transposed.retain_grad()
     torch_qk_matmul.retain_grad()
     torch_scale.retain_grad()
     torch_key.retain_grad()
@@ -299,14 +303,16 @@ def test_self_attention():
     torch_attention_out.retain_grad()
 
     # ATOM forward pass
-    atom_query = atom_q_proj(atom_x_emb)
-    atom_key = atom_k_proj(atom_x_emb)
-    atom_value = atom_v_proj(atom_x_emb)
+    atom_query = atom_q_proj(atom_x_emb).reshape((BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM))
+    atom_key = atom_k_proj(atom_x_emb).reshape((BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM))
+    atom_value = atom_v_proj(atom_x_emb).reshape((BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM))
 
-    atom_qk_matmul = atom.matmul(atom_query, atom_key.transpose(2, 1))
+    atom_key_transposed = atom_key.transpose((0, 1, 3, 2))
+    atom_qk_matmul = atom.matmul(atom_query, atom_key_transposed)
     atom_scale = atom_qk_matmul * atom(EMBEDDING_DIM**-0.5)
-    atom_mask = atom_scale.masked_fill(atom(atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0))
-    atom_softmax = atom_mask.softmax(dim=-1)
+    mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0 # atom_mask
+    atom_scale.data[:, :, (mask == 1)] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
+    atom_softmax = atom_scale.softmax(dim=-1)
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value)
     atom_attention_out = atom_ln_attn_out(atom_softmax_v_matmul)
 
@@ -319,6 +325,10 @@ def test_self_attention():
     atom_loss.backward()
 
     SCALE = BATCH * SEQ_LEN
+
+    print(torch_key.grad.detach().numpy()[0])
+    print()
+    print((atom_key.grad / SCALE).data[0])
 
     # Check the gradient for each forward pass calculation
     assert np.allclose(torch_softmax_v_matmul.grad.detach().numpy(), (atom_softmax_v_matmul.grad / SCALE).data)
@@ -342,3 +352,94 @@ def test_self_attention():
     # Attention linear layer parameters
     assert np.allclose(torch_ln_attn_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data)
     assert np.allclose(torch_ln_attn_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data)
+
+def test_multi_head_attention():
+    BATCH = 2
+    SEQ_LEN = 5
+    NUM_HEADS = 4 
+    EMBEDDING_DIM = 16
+    HEAD_DIM = EMBEDDING_DIM // NUM_HEADS
+
+    torch_x_emb = torch.randn(BATCH, SEQ_LEN, EMBEDDING_DIM)
+    atom_x_emb = atom(torch_x_emb.numpy(), requires_grad=True)
+
+    torch_y = torch.randint(low=0, high=EMBEDDING_DIM, size=(BATCH*SEQ_LEN,))
+    atom_y = atom(torch_y.numpy())
+
+    torch_tril = torch.tril(torch.ones((SEQ_LEN, SEQ_LEN)))
+    atom_tril = atom.tril(atom.ones((SEQ_LEN, SEQ_LEN)))
+
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+    atom_loss_fn = nn.cross_entropy()
+
+    torch_q_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+    torch_k_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+    torch_v_proj = torch.nn.Linear(EMBEDDING_DIM, EMBEDDING_DIM)
+    torch_ln_out = torch.nn.Linear(NUM_HEADS*HEAD_DIM, EMBEDDING_DIM)
+
+    atom_q_proj, q_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_q_proj.weight.T.detach().numpy(), requires_grad=True), atom(torch_q_proj.bias.detach().numpy(), requires_grad=True)])
+    atom_k_proj, k_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_k_proj.weight.T.detach().numpy(), requires_grad=True), atom(torch_k_proj.bias.detach().numpy(), requires_grad=True)])
+    atom_v_proj, v_params = nn.linear(EMBEDDING_DIM, EMBEDDING_DIM, parameters=[atom(torch_v_proj.weight.T.detach().numpy(), requires_grad=True), atom(torch_v_proj.bias.detach().numpy(), requires_grad=True)])
+    atom_ln_out, atom_ln_params = nn.linear(NUM_HEADS*HEAD_DIM, EMBEDDING_DIM, parameters=[atom(torch_ln_out.weight.T.detach().numpy(), requires_grad=True), atom(torch_ln_out.bias.detach().numpy(), requires_grad=True)])
+
+    # TORCH forward pass
+    torch_query = torch_q_proj(torch_x_emb).reshape(BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+    torch_key = torch_k_proj(torch_x_emb).reshape(BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+    torch_value = torch_v_proj(torch_x_emb).reshape(BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM)
+
+    torch_key_transposed = torch_key.transpose(-2, -1)
+    torch_qk_matmul = torch.matmul(torch_query, torch_key_transposed)
+    torch_scale = torch_qk_matmul * HEAD_DIM**-0.5
+    torch_mask = torch_scale.masked_fill(torch_tril[:SEQ_LEN, :SEQ_LEN] == 0, float('-inf'))
+    torch_softmax = torch.nn.functional.softmax(torch_mask, dim=-1)
+    torch_softmax_v_matmul = torch.matmul(torch_softmax, torch_value).reshape(BATCH, SEQ_LEN, NUM_HEADS*HEAD_DIM)
+    torch_attn_out = torch_ln_out(torch_softmax_v_matmul)
+
+    torch_query.retain_grad()
+    torch_key.retain_grad()
+    torch_value.retain_grad()
+    torch_key_transposed.retain_grad()
+    torch_qk_matmul.retain_grad()
+    torch_scale.retain_grad()
+    torch_key.retain_grad()
+    torch_softmax.retain_grad()
+    torch_softmax_v_matmul.retain_grad()
+    torch_attn_out.retain_grad()
+
+    # ATOM forward pass
+    atom_query = atom_q_proj(atom_x_emb).reshape((BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM))
+    atom_key = atom_k_proj(atom_x_emb).reshape((BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM))
+    atom_value = atom_v_proj(atom_x_emb).reshape((BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM))
+
+    atom_key_transposed = atom_key.transpose((0, 1, 3, 2))
+    atom_qk_matmul = atom.matmul(atom_query, atom_key_transposed)
+    atom_scale = atom_qk_matmul * HEAD_DIM**-0.5
+    #atom_mask
+    mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0
+    atom_scale.data[:, :, (mask == 1)] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
+
+    atom_softmax = atom_scale.softmax(dim=-1)
+    atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value).reshape((BATCH, SEQ_LEN, NUM_HEADS*HEAD_DIM))
+    atom_attn_out = atom_ln_out(atom_softmax_v_matmul)
+
+    torch_loss = torch_loss_fn(torch_attn_out.view(BATCH*SEQ_LEN, EMBEDDING_DIM), torch_y)
+    atom_loss = atom_loss_fn(atom_attn_out.reshape((BATCH*SEQ_LEN, EMBEDDING_DIM)), atom_y)
+
+    torch_loss.backward()
+    atom_loss.backward()
+
+    SCALE = (BATCH * SEQ_LEN)
+
+    # Check the gradient for each parameters
+    # Query projection parameters
+    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data)
+    assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data)
+    # Key projection parameters
+    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data)
+    assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data)
+    # Value projection parameters
+    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data)
+    assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data)
+    # Attention linear layer parameters
+    assert np.allclose(torch_ln_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data)
+    assert np.allclose(torch_ln_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data)
