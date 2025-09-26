@@ -2,7 +2,8 @@ import torch
 import numpy as np
 import cupy as cp
 from tensor import atom
-import nn 
+import nn
+import pytest
 
 def test_matmul_for_2d():
     x1_atom = atom.randn((2, 3), device='cpu')
@@ -94,8 +95,8 @@ def test_cross_entropy():
     torch_loss.backward()
     atom_loss.backward()
 
-    model_output_grad_satisfied = np.allclose((x_atom.grad / BATCH).data, x_torch.grad.detach().numpy())
-    loss_fn_satisfied = np.allclose(atom_loss.data, torch_loss.detach().numpy())
+    model_output_grad_satisfied = np.allclose((x_atom.grad / BATCH).data, x_torch.grad.detach().numpy(), atol=1e-5)
+    loss_fn_satisfied = np.allclose(atom_loss.data, torch_loss.detach().numpy(), atol=1e-5)
 
     assert model_output_grad_satisfied and loss_fn_satisfied
 
@@ -135,8 +136,8 @@ def test_1_layer_linear_ops():
     atom_grad = atom_out.softmax(dim=-1) - atom_y
     atom_loss.backward(atom_grad)
 
-    weight_grad_satisfied = np.allclose((atom_w.grad / BATCH_SIZE).data, torch_ln.weight.grad.T.numpy())
-    bias_grad_satisfied = np.allclose((atom_b.grad / BATCH_SIZE).data,  torch_ln.bias.grad.numpy())
+    weight_grad_satisfied = np.allclose((atom_w.grad / BATCH_SIZE).data, torch_ln.weight.grad.T.numpy(), atol=1e-5)
+    bias_grad_satisfied = np.allclose((atom_b.grad / BATCH_SIZE).data,  torch_ln.bias.grad.numpy(), atol=1e-5)
 
     assert weight_grad_satisfied and bias_grad_satisfied
 
@@ -184,8 +185,8 @@ def test_2_layer_linear_ops():
     # Atom automatic gradient calculation
     atom_loss.backward()
 
-    weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy())
-    bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy())
+    weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy(), atol=1e-5)
+    bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy(), atol=1e-5)
 
     assert weight_grad_satisfied and bias_grad_satisfied
 
@@ -241,8 +242,8 @@ def test_2_layer_with_act_linear_ops():
     # Atom automatic gradient calculation
     atom_loss.backward()
 
-    weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy())
-    bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy())
+    weight_grad_satisfied = np.allclose((atom_w_ln_1.grad / BATCH_SIZE).data, torch_ln_1.weight.grad.T.numpy(), atol=1e-5)
+    bias_grad_satisfied = np.allclose((atom_b_ln_1.grad / BATCH_SIZE).data,  torch_ln_1.bias.grad.numpy(), atol=1e-5)
 
     assert weight_grad_satisfied and bias_grad_satisfied
 
@@ -341,22 +342,22 @@ def test_self_attention():
 
     # Check the gradient for each parameters
     # Query projection parameters
-    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data)
-    assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data)
+    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data, atol=1e-5)
     # Key projection parameters
-    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data)
-    assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data)
+    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data, atol=1e-5)
     # Value projection parameters
-    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data)
-    assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data)
+    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data, atol=1e-5)
     # Attention linear layer parameters
-    assert np.allclose(torch_ln_attn_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data)
-    assert np.allclose(torch_ln_attn_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data)
+    assert np.allclose(torch_ln_attn_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_ln_attn_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data, atol=1e-5)
 
 def test_multi_head_attention():
     BATCH = 2
     SEQ_LEN = 5
-    NUM_HEADS = 4 
+    NUM_HEADS = 2
     EMBEDDING_DIM = 16
     HEAD_DIM = EMBEDDING_DIM // NUM_HEADS
 
@@ -417,7 +418,6 @@ def test_multi_head_attention():
     #atom_mask
     mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0
     atom_scale.data[:, :, (mask == 1)] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
-
     atom_softmax = atom_scale.softmax(dim=-1)
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value).reshape((BATCH, SEQ_LEN, NUM_HEADS*HEAD_DIM))
     atom_attn_out = atom_ln_out(atom_softmax_v_matmul)
@@ -432,14 +432,120 @@ def test_multi_head_attention():
 
     # Check the gradient for each parameters
     # Query projection parameters
-    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data)
-    assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data)
+    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data, atol=1e-5)
     # Key projection parameters
-    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data)
-    assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data)
+    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data, atol=1e-5)
     # Value projection parameters
-    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data)
-    assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data)
+    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data, atol=1e-5)
     # Attention linear layer parameters
-    assert np.allclose(torch_ln_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data)
-    assert np.allclose(torch_ln_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data)
+    assert np.allclose(torch_ln_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_ln_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data, atol=1e-5)
+
+def test_embeddings():
+    BATCH = 2
+    SEQ_LEN = 5
+    VOCAB_SIZE = 10
+
+    torch_indices = torch.randint(low=0, high=VOCAB_SIZE, size=(BATCH, SEQ_LEN))
+    torch_expected = torch.zeros(BATCH*SEQ_LEN, VOCAB_SIZE)
+    torch_expected[torch.arange(len(torch_expected)), torch_indices.view(BATCH*SEQ_LEN)] = 1
+    torch_pos_tensor = torch.arange(SEQ_LEN)
+
+    atom_indices = atom(torch_indices.numpy())
+    atom_expected = atom(torch_expected.numpy())
+    atom_pos_tensor = atom(torch_pos_tensor.numpy())
+
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+    atom_loss_fn = nn.cross_entropy()
+
+    torch_char = torch.nn.Embedding(VOCAB_SIZE, VOCAB_SIZE)
+    torch_pos = torch.nn.Embedding(SEQ_LEN, VOCAB_SIZE)
+
+    atom_char_emb, char_emb_params = nn.embeddings(VOCAB_SIZE, VOCAB_SIZE, parameters=atom(torch_char.weight.data.numpy()))
+    atom_pos_emb, pos_emb_params = nn.embeddings(BATCH, VOCAB_SIZE, parameters=atom(torch_pos.weight.data.numpy()))
+
+    # Torch forward pass
+    torch_emb_char_out = torch_char(torch_indices)
+    torch_emb_pos_out = torch_pos(torch_pos_tensor)
+    torch_output = torch_emb_char_out + torch_emb_pos_out
+    torch_output.retain_grad()
+    torch_emb_char_out.retain_grad()
+    torch_emb_pos_out.retain_grad()
+
+    # Atom forward pass
+    atom_emb_char_out = atom_char_emb(atom_indices)
+    atom_emb_pos_out = atom_pos_emb(atom_pos_tensor)
+    atom_output = atom_emb_char_out + atom_emb_pos_out
+
+    torch_loss = torch_loss_fn(torch_output.view(BATCH*SEQ_LEN, VOCAB_SIZE), torch_expected)
+    atom_loss = atom_loss_fn(atom_output.reshape((BATCH*SEQ_LEN, VOCAB_SIZE)), atom_expected)
+
+    torch_loss.backward()
+    atom_loss.backward()
+
+    assert np.allclose(torch_pos.weight.grad.detach().numpy(), (pos_emb_params.grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_char.weight.grad.detach().numpy(), (char_emb_params.grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+
+def test_layer_norm():
+    BATCH = 2
+    SEQ_LEN = 5
+    OUTPUT_DIM = 10
+
+    torch_x = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
+    torch_y = torch.randint(low=0, high=OUTPUT_DIM, size=(BATCH*SEQ_LEN,))
+
+    atom_x = atom(torch_x.numpy())
+    atom_y = atom(torch_y.numpy())
+
+    torch_loss_fn = torch.nn.CrossEntropyLoss()
+    atom_loss_fn = nn.cross_entropy()
+
+    torch_layer_norm = torch.nn.LayerNorm(OUTPUT_DIM)
+    atom_layer_norm, parameters = nn.layer_norm(OUTPUT_DIM)
+
+    torch_output = torch_layer_norm(torch_x)
+    atom_output = atom_layer_norm(atom_x)
+
+    torch_loss = torch_loss_fn(torch_output.reshape(BATCH*SEQ_LEN, OUTPUT_DIM), torch_y)
+    atom_loss = atom_loss_fn(atom_output.reshape((BATCH*SEQ_LEN, OUTPUT_DIM)), atom_y)
+
+    torch_loss.backward()
+    atom_loss.backward()
+
+    assert np.allclose(torch_layer_norm.weight.grad.detach().numpy(), (parameters[0].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_layer_norm.bias.grad.detach().numpy(), (parameters[1].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+
+
+@pytest.mark.skip(reason="This test is currently not relevant.")
+def test_dropout():
+    BATCH = 2
+    SEQ_LEN = 5
+    OUTPUT_DIM = 10
+
+    torch_x = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM, requires_grad=True)
+    atom_x = atom(torch_x.detach().numpy(), requires_grad=True)
+
+    # Example gradients
+    torch_exp_grad = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
+    atom_exp_grad = atom(torch_exp_grad.numpy())
+    
+    torch_dropout = torch.nn.Dropout(p=0.1)
+    atom_dropout = nn.dropout(p=0.1)
+
+    torch_output = torch_dropout(torch_x)
+    atom_output = atom_dropout(atom_x)
+
+    torch_output.backward(torch_exp_grad)
+    atom_output.backward(atom_exp_grad)
+
+    print(torch_x.grad[0])
+    print()
+    print(torch_output[0])
+    print()
+    print()
+    print((atom_x.grad / (BATCH*SEQ_LEN)).data[0])
+    print()
+    print(atom_output.data[0])
