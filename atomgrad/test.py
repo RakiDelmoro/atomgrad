@@ -326,10 +326,6 @@ def test_self_attention():
 
     SCALE = BATCH * SEQ_LEN
 
-    print(torch_key.grad.detach().numpy()[0])
-    print()
-    print((atom_key.grad / SCALE).data[0])
-
     # Check the gradient for each forward pass calculation
     assert np.allclose(torch_softmax_v_matmul.grad.detach().numpy(), (atom_softmax_v_matmul.grad / SCALE).data)
     assert np.allclose(torch_softmax.grad.detach().numpy(), (atom_softmax.grad / SCALE).data)
@@ -341,16 +337,16 @@ def test_self_attention():
 
     # Check the gradient for each parameters
     # Query projection parameters
-    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_q_proj.weight.grad.T.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data, atol=1e-5)
     # Key projection parameters
-    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_k_proj.weight.grad.T.detach().numpy(), (k_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data, atol=1e-5)
     # Value projection parameters
-    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_v_proj.weight.grad.T.detach().numpy(), (v_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data, atol=1e-5)
     # Attention linear layer parameters
-    assert np.allclose(torch_ln_attn_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_ln_attn_out.weight.grad.T.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_ln_attn_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data, atol=1e-5)
 
 def test_multi_head_attention():
@@ -429,16 +425,16 @@ def test_multi_head_attention():
 
     # Check the gradient for each parameters
     # Query projection parameters
-    assert np.allclose(torch_q_proj.weight.grad.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_q_proj.weight.grad.T.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_q_proj.bias.grad.detach().numpy(), (q_params[1].grad / SCALE).data, atol=1e-5)
     # Key projection parameters
-    assert np.allclose(torch_k_proj.weight.grad.detach().numpy(), (k_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_k_proj.weight.grad.T.detach().numpy(), (k_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_k_proj.bias.grad.detach().numpy(), (k_params[1].grad / SCALE).data, atol=1e-5)
     # Value projection parameters
-    assert np.allclose(torch_v_proj.weight.grad.detach().numpy(), (v_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_v_proj.weight.grad.T.detach().numpy(), (v_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_v_proj.bias.grad.detach().numpy(), (v_params[1].grad / SCALE).data, atol=1e-5)
     # Attention linear layer parameters
-    assert np.allclose(torch_ln_out.weight.grad.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
+    assert np.allclose(torch_ln_out.weight.grad.T.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_ln_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data, atol=1e-5)
 
 def test_embeddings():
@@ -515,6 +511,52 @@ def test_layer_norm():
     assert np.allclose(torch_layer_norm.weight.grad.detach().numpy(), (parameters[0].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
     assert np.allclose(torch_layer_norm.bias.grad.detach().numpy(), (parameters[1].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
 
+def test_residual_connection():
+    BATCH = 2
+    SEQ_LEN = 5
+    FEATURE_DIM = 16
+
+    torch_x = torch.randn(BATCH, SEQ_LEN, FEATURE_DIM, requires_grad=True)
+    atom_x = atom(torch_x.detach().numpy(), requires_grad=True)
+
+    torch_grad = torch.randn(BATCH, SEQ_LEN, FEATURE_DIM)
+    atom_grad = atom(torch_grad.numpy())
+
+    torch_lin1 = torch.nn.Linear(FEATURE_DIM, FEATURE_DIM*2)
+    torch_act_fn = torch.nn.ReLU()
+    torch_lin2 = torch.nn.Linear(FEATURE_DIM*2, FEATURE_DIM)
+
+    atom_lin1, atom_lin1_params = nn.linear(FEATURE_DIM, FEATURE_DIM*2, parameters=[atom(torch_lin1.weight.T.detach().numpy()), atom(torch_lin1.bias.detach().numpy())])
+    atom_act_fn = nn.relu()
+    atom_lin2 , atom_lin2_params = nn.linear(FEATURE_DIM*2, FEATURE_DIM, parameters=[atom(torch_lin2.weight.T.detach().numpy()), atom(torch_lin2.bias.detach().numpy())])
+
+    # Torch forward pass
+    torch_lin1_out = torch_lin1(torch_x)
+    torch_act_out = torch_act_fn(torch_lin1_out)
+    torch_lin2_out = torch_lin2(torch_act_out)
+    torch_residual_connection = torch_lin2_out + torch_x
+    torch_lin1_out.retain_grad()
+    torch_lin2_out.retain_grad()
+
+    # Atom forward pass
+    atom_lin1_out = atom_lin1(atom_x)
+    atom_act_out = atom_act_fn(atom_lin1_out)
+    atom_lin2_out = atom_lin2(atom_act_out)
+    atom_residual_connection = atom_lin2_out + atom_x
+
+    torch_residual_connection.backward(torch_grad)
+    atom_residual_connection.backward(atom_grad)
+
+    assert np.allclose(torch_x.grad.detach().numpy(), atom_x.grad.data, atol=1e-5)
+    # Linear 1 parameters
+    assert np.allclose(torch_lin1.weight.grad.T.detach().numpy(), (atom_lin1_params[0].grad).data, atol=1e-5)
+    assert np.allclose(torch_lin1.bias.grad.detach().numpy(), (atom_lin1_params[1].grad).data, atol=1e-5)
+    # Linear 2 parameters
+    assert np.allclose(torch_lin2.weight.grad.T.detach().numpy(), (atom_lin2_params[0].grad).data, atol=1e-5)
+    assert np.allclose(torch_lin2.bias.grad.detach().numpy(), (atom_lin2_params[1].grad).data, atol=1e-5)
+
+    # When doing residual/skip connection the calculation of gradient doesn't divide by (BATCH*SEQ_LEN)
+
 @pytest.mark.skip(reason="This test is currently not relevant.")
 def test_dropout():
     BATCH = 2
@@ -524,16 +566,17 @@ def test_dropout():
     torch_x = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM, requires_grad=True)
     atom_x = atom(torch_x.detach().numpy(), requires_grad=True)
 
-    # Example gradients
-    torch_exp_grad = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
-    atom_exp_grad = atom(torch_exp_grad.numpy())
-    
-    torch_mask = torch.rand(BATCH, SEQ_LEN, OUTPUT_DIM) > 0.1
     torch_dropout = torch.nn.Dropout(p=0.1)
     atom_dropout = nn.dropout(p=0.1)
 
+    # Example gradients
+    torch_exp_grad = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
+    atom_exp_grad = atom(torch_exp_grad.numpy())
+
+    # Torch and Atom forward pass
     torch_output = torch_dropout(torch_x)
     atom_output = atom_dropout(atom_x)
+
     torch_output.backward(torch_exp_grad)
     atom_output.backward(atom_exp_grad)
 
