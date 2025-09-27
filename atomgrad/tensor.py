@@ -313,7 +313,12 @@ class atom:
     def masked_fill(self, mask):
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
 
-        self.data[:, (mask.data == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+        if self.ndim == 2:
+            self.data[(mask == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+        elif self.ndim == 3:
+            self.data[:, (mask == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+        elif self.ndim == 4:
+            self.data[:, :, (mask == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
 
         return self
     
@@ -427,8 +432,8 @@ class atom:
         result._grad_fn = grad_fn
         return result
     
-    def dropout_(self, prob, train=True):
-        mask = None
+    def dropout_(self, prob, train=True, mask=None):
+        # mask = None
         scale = 1.0
 
         if train and prob != 0:
@@ -498,7 +503,7 @@ class atom:
     
     def reshape(self, shape=Iterable[int]):
         result = self.data.reshape(shape)
-        
+
         def grad_fn(grad):
             if self.requires_grad:
                 self.grad = atom.zeros_like(result, self.device)
