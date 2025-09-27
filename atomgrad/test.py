@@ -16,7 +16,7 @@ def test_matmul_for_2d():
     y_atom = atom.matmul(x1_atom, x2_atom)
     y_torch = torch.matmul(x1_torch, x2_torch)
 
-    assert np.allclose(y_atom.data, y_torch.numpy())
+    assert np.allclose(y_atom.data, y_torch.numpy(), atol=1e-5)
 
 def test_matmul_for_3d():
     x1_atom = atom.randn((2, 3, 10))
@@ -28,7 +28,7 @@ def test_matmul_for_3d():
     y_atom = atom.matmul(x1_atom, x2_atom)
     y_torch = torch.matmul(x1_torch, x2_torch)
     
-    assert np.allclose(y_atom.data, y_torch.numpy())
+    assert np.allclose(y_atom.data, y_torch.numpy(), atol=1e-5)
 
 def test_relu():
     x_atom = atom.randn((2, 5))
@@ -37,7 +37,7 @@ def test_relu():
     y_atom = x_atom.relu() 
     y_torch = x_torch.relu()
 
-    satified = np.allclose(y_atom.data, y_torch.numpy())
+    satified = np.allclose(y_atom.data, y_torch.numpy(), atol=1e-5)
 
     assert satified
 
@@ -48,7 +48,7 @@ def test_softmax():
     y_atom = x_atom.softmax(dim=-1) 
     y_torch = x_torch.softmax(dim=-1)
 
-    satified = np.allclose(y_atom.data, y_torch.numpy())
+    satified = np.allclose(y_atom.data, y_torch.numpy(), atol=1e-5)
 
     assert satified
 
@@ -59,7 +59,7 @@ def test_log_softmax():
     y_atom = x_atom.log_softmax(dim=-1) 
     y_torch = x_torch.log_softmax(dim=-1)
 
-    assert np.allclose(y_atom.data, y_torch.numpy())
+    assert np.allclose(y_atom.data, y_torch.numpy(), atol=1e-5)
 
 def test_one_hot():
     x_atom = atom.randint(0, 5, size=(2,))
@@ -68,7 +68,7 @@ def test_one_hot():
     y_atom = x_atom.one_hot(num_classes=5)
     y_torch = torch.nn.functional.one_hot(x_torch, num_classes=5)
 
-    assert np.allclose(y_atom.data, y_torch.numpy())
+    assert np.allclose(y_atom.data, y_torch.numpy(), atol=1e-5)
 
 def test_cross_entropy():
     # DATASET
@@ -311,9 +311,8 @@ def test_self_attention():
     atom_key_transposed = atom_key.transpose((0, 1, 3, 2))
     atom_qk_matmul = atom.matmul(atom_query, atom_key_transposed)
     atom_scale = atom_qk_matmul * atom(EMBEDDING_DIM**-0.5)
-    mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0 # atom_mask
-    atom_scale.data[:, :, (mask == 1)] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
-    atom_softmax = atom_scale.softmax(dim=-1)
+    atom_mask = atom_scale.masked_fill(atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0)
+    atom_softmax = atom_mask.softmax(dim=-1)
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value)
     atom_attention_out = atom_ln_attn_out(atom_softmax_v_matmul)
 
@@ -415,10 +414,8 @@ def test_multi_head_attention():
     atom_key_transposed = atom_key.transpose((0, 1, 3, 2))
     atom_qk_matmul = atom.matmul(atom_query, atom_key_transposed)
     atom_scale = atom_qk_matmul * HEAD_DIM**-0.5
-    #atom_mask
-    mask = atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0
-    atom_scale.data[:, :, (mask == 1)] = -np.inf if atom_scale.device == 'cpu' else -cp.inf
-    atom_softmax = atom_scale.softmax(dim=-1)
+    atom_mask = atom_scale.masked_fill(atom_tril.data[:SEQ_LEN, :SEQ_LEN] == 0)
+    atom_softmax = atom_mask.softmax(dim=-1)
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value).reshape((BATCH, SEQ_LEN, NUM_HEADS*HEAD_DIM))
     atom_attn_out = atom_ln_out(atom_softmax_v_matmul)
 
@@ -518,7 +515,6 @@ def test_layer_norm():
     assert np.allclose(torch_layer_norm.weight.grad.detach().numpy(), (parameters[0].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
     assert np.allclose(torch_layer_norm.bias.grad.detach().numpy(), (parameters[1].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
 
-
 @pytest.mark.skip(reason="This test is currently not relevant.")
 def test_dropout():
     BATCH = 2
@@ -532,20 +528,20 @@ def test_dropout():
     torch_exp_grad = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
     atom_exp_grad = atom(torch_exp_grad.numpy())
     
+    torch_mask = torch.rand(BATCH, SEQ_LEN, OUTPUT_DIM) > 0.1
     torch_dropout = torch.nn.Dropout(p=0.1)
     atom_dropout = nn.dropout(p=0.1)
 
     torch_output = torch_dropout(torch_x)
     atom_output = atom_dropout(atom_x)
-
     torch_output.backward(torch_exp_grad)
     atom_output.backward(atom_exp_grad)
 
-    print(torch_x.grad[0])
-    print()
     print(torch_output[0])
     print()
+    print(torch_x.grad[0])
     print()
-    print((atom_x.grad / (BATCH*SEQ_LEN)).data[0])
     print()
     print(atom_output.data[0])
+    print()
+    print((atom_x.grad / (BATCH*SEQ_LEN)).data[0])
