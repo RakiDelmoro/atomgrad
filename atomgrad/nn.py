@@ -67,11 +67,22 @@ def kaiming_params_init(input_size, output_size, device='cpu', bias=True):
     if bias: return [weights, bias]
     else: return [weights]
 
+def embeddinigs_params_init(vocab_size, embedding_dim, device='cpu'):
+    if device == 'cpu':
+        weight = np.random.normal(loc=0.0, scale=1.0, size=(vocab_size, embedding_dim))
+    else:
+        weight = cp.random.normal(loc=0.0, scale=1.0, size=(vocab_size, embedding_dim))
+
+    return atom(weight, device)
+
 '''Neural Network operations'''
 def linear(input_size, output_size, device='cpu', bias=True, parameters=None):
     learnable_params = kaiming_params_init(input_size, output_size, device, bias)
     
-    if parameters is not None: learnable_params = parameters
+    if parameters is not None:
+        parameters[0].requires_grad = True
+        parameters[1].requires_grad = True
+        learnable_params = parameters
 
     def forward(data):
         weights = learnable_params[0]
@@ -83,6 +94,43 @@ def linear(input_size, output_size, device='cpu', bias=True, parameters=None):
         return result
 
     return forward, learnable_params
+
+def embeddings(num_embeddings, embedding_dim, device='cpu', parameters=None):
+    learnable_params = embeddinigs_params_init(num_embeddings, embedding_dim, device)
+
+    if parameters is not None: learnable_params = parameters
+
+    def forward(indices):
+        return indices.embeddings_(learnable_params)
+    
+    return forward, learnable_params
+
+def layer_norm(normalized_shape, eps=1e-5, device='cpu', parameters=None):
+    learnable_parameters = []
+
+    if parameters is None:
+        weight = atom.ones(shape=(normalized_shape,), device=device, requires_grad=True)
+        bias = atom.zeros(shape=(normalized_shape,), device=device, requires_grad=True)
+    else:
+        weight = parameters[0]
+        bias = parameters[1]
+
+    learnable_parameters.extend([weight])
+    learnable_parameters.extend([bias])
+
+    def forward(atom_tensor):
+        x_normalized = atom_tensor.layer_norm_(eps)
+        mul_result = weight * x_normalized
+
+        return mul_result + bias
+    
+    return forward, learnable_parameters
+
+def dropout(p, train=True, mask=None):
+    def forward(atom_tensor):
+        return atom_tensor.dropout_(p, train, mask=mask)
+    
+    return forward
 
 '''Activation Function'''
 def relu():
