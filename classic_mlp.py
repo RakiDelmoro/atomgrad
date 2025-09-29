@@ -2,20 +2,10 @@ import torch
 import pickle
 import tqdm 
 from dataset.utils import mnist_dataloader
-from atomgrad.examples.mlp.neural_network import mlp
 
-import atomgrad.atom as atom
-
-# CPU
-import atomgrad.cpu.nn_ops as cpu_nn_ops
-import atomgrad.cpu.loss_fn.loss_fn_nn as cpu_loss_ops
-import atomgrad.cpu.optimizer as cpu_optimizer
-import atomgrad.cpu.activations_fn.activations as cpu_act_ops
-# CUDA
-import atomgrad.cuda.nn_ops as cuda_nn_ops
-import atomgrad.cuda.activations_fn.activations as cuda_act_ops
-import atomgrad.cuda.loss_fn.loss_fn_nn as cuda_loss_ops
-import atomgrad.cuda.optimizer as cuda_optimizer
+from atomgrad.tensor import atom
+import atomgrad.nn as nn
+import atomgrad.optim as optim
 
 DEVICE = 'cuda'
 
@@ -33,14 +23,14 @@ def atom_runner():
     
     # Initialize Model
     parameters = []
-    linear_1, params_1 = cuda_nn_ops.linear_layer(784, 2000)
-    activation = cuda_act_ops.relu()
-    linear_2, params_2 = cuda_nn_ops.linear_layer(2000, 10)
+    linear_1, params_1 = nn.linear(784, 2000, device=DEVICE)
+    activation = nn.relu()
+    linear_2, params_2 = nn.linear(2000, 10, device=DEVICE)
     parameters.extend(params_1)
     parameters.extend(params_2)
 
-    loss_fn = cuda_loss_ops.cross_entropy_loss()
-    step, zero_grad = cuda_optimizer.adam(parameters, lr=LEARNING_RATE)
+    loss_fn = nn.cross_entropy()
+    step, zero_grad = optim.Adam(parameters, lr=LEARNING_RATE)
 
     for _ in (t := tqdm.trange(MAX_EPOCHS)):
         train_loader = mnist_dataloader(train_images, train_labels, batch_size=BATCH_SIZE, shuffle=True)
@@ -49,31 +39,30 @@ def atom_runner():
         # Training Loop
         train_loss = []
         for batched_image, batched_label in train_loader:
-            batched_image = atom.tensor(batched_image, requires_grad=True, device=DEVICE)
-            batched_label = atom.tensor(batched_label, device=DEVICE)
+            batched_image = atom(batched_image, device=DEVICE)
+            batched_label = atom(batched_label, device=DEVICE)
 
-            batch = batched_image['data'].shape[0]
+            batch = batched_image.shape[0]
 
             # Forward pass: linear 1 -> activation fn -> linear 2
             model_prediction = linear_2(activation(linear_1(batched_image)))
 
-            avg_loss, gradients = loss_fn(model_prediction, batched_label)
-            # print(avg_loss)
+            avg_loss = loss_fn(model_prediction, batched_label)
             
-            zero_grad(parameters)
-            atom.backward(model_prediction, gradients)
+            zero_grad()
+            avg_loss.backward()
             step(batch)
 
-            train_loss.append(avg_loss.item())
+            train_loss.append(avg_loss.data.item())
 
         # Test Loop
         accuracies = []
         for batched_image, batched_label in test_loader:
-            batched_image = atom.tensor(batched_image, requires_grad=True, device=DEVICE)
-            batched_label = atom.tensor(batched_label, device=DEVICE)
+            batched_image = atom(batched_image, requires_grad=True, device=DEVICE)
+            batched_label = atom(batched_label, device=DEVICE)
 
-            model_pred_probabilities = linear_2(activation(linear_1(batched_image)))['data']
-            batch_accuracy = (model_pred_probabilities.argmax(axis=-1) == batched_label['data']).mean()
+            model_pred_probabilities = linear_2(activation(linear_1(batched_image))).data
+            batch_accuracy = (model_pred_probabilities.argmax(axis=-1) == batched_label.data).mean()
 
             accuracies.append(batch_accuracy)
 
@@ -157,6 +146,5 @@ def torch_runner():
 # TODO: Make atomgrad effecient as Pytorch
 # TODO: How can I make atomgrad memory efficient same as pytorch
 
-atom_runner()
-# torch_runner()
-
+# atom_runner()
+torch_runner()
