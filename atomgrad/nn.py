@@ -1,7 +1,15 @@
 import math
 import cupy as cp
 import numpy as np
-from tensor import atom
+from tensor import atom, LeafTensor
+
+class Parameter:
+    def __init__(self, data, requires_grad=True):
+        self.data = data
+        self.requires_grad = requires_grad
+        self.grad = None
+        self.moment = None
+        self.velocity = None
 
 ''' Parameters Initialization'''
 def calculate_gain(nonlinearity, param=None):
@@ -64,8 +72,8 @@ def kaiming_params_init(input_size, output_size, device='cpu', bias=True):
     bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
     bias = atom.uniform(-bound, bound, size=(output_size,), device=device)
 
-    if bias: return [weights, bias]
-    else: return [weights]
+    if bias: return [atom(weights.data, device, requires_grad=True), atom(bias.data, device, requires_grad=True)]
+    else: return [atom(weights.data, device, requires_grad=True)]
 
 def embeddinigs_params_init(vocab_size, embedding_dim, device='cpu'):
     if device == 'cpu':
@@ -98,7 +106,9 @@ def linear(input_size, output_size, device='cpu', bias=True, parameters=None):
 def embeddings(num_embeddings, embedding_dim, device='cpu', parameters=None):
     learnable_params = embeddinigs_params_init(num_embeddings, embedding_dim, device)
 
-    if parameters is not None: learnable_params = parameters
+    if parameters is not None:
+        parameters.requires_grad = True
+        learnable_params = parameters
 
     def forward(indices):
         return indices.embeddings_(learnable_params)
@@ -173,7 +183,7 @@ def cross_entropy():
             model_output.grad = grad
             expected_output.grad = grad
 
-        scalar_loss = atom(avg_loss, model_output.device, model_output.requires_grad, depends_on=[model_output, expected_output], operation='cross_entropy', grad_fn=grad_fn)
+        scalar_loss = LeafTensor(avg_loss, model_output.device, model_output.requires_grad, depends_on=[model_output, expected_output], operation='cross_entropy', grad_fn=grad_fn)
 
         return scalar_loss
     
