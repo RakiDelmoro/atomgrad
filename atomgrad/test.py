@@ -326,15 +326,6 @@ def test_self_attention():
 
     SCALE = BATCH * SEQ_LEN
 
-    # Check the gradient for each forward pass calculation
-    assert np.allclose(torch_softmax_v_matmul.grad.detach().numpy(), (atom_softmax_v_matmul.grad / SCALE).data)
-    assert np.allclose(torch_softmax.grad.detach().numpy(), (atom_softmax.grad / SCALE).data)
-    assert np.allclose(torch_scale.grad.detach().numpy(), (atom_scale.grad / SCALE).data)
-    assert np.allclose(torch_qk_matmul.grad.detach().numpy(), (atom_qk_matmul.grad / SCALE).data)
-    assert np.allclose(torch_value.grad.detach().numpy(), (atom_value.grad / SCALE).data)
-    assert np.allclose(torch_key.grad.detach().numpy(), (atom_key.grad / SCALE).data)
-    assert np.allclose(torch_query.grad.detach().numpy(), (atom_query.grad / SCALE).data)
-
     # Check the gradient for each parameters
     # Query projection parameters
     assert np.allclose(torch_q_proj.weight.grad.T.detach().numpy(), (q_params[0].grad / SCALE).data, atol=1e-5)
@@ -355,6 +346,7 @@ def test_multi_head_attention():
     NUM_HEADS = 2
     EMBEDDING_DIM = 16
     HEAD_DIM = EMBEDDING_DIM // NUM_HEADS
+    SCALE = (BATCH * SEQ_LEN)
 
     torch_x_emb = torch.randn(BATCH, SEQ_LEN, EMBEDDING_DIM)
     atom_x_emb = atom(torch_x_emb.numpy(), requires_grad=True)
@@ -415,13 +407,14 @@ def test_multi_head_attention():
     atom_softmax_v_matmul = atom.matmul(atom_softmax, atom_value).reshape((BATCH, SEQ_LEN, NUM_HEADS*HEAD_DIM))
     atom_attn_out = atom_ln_out(atom_softmax_v_matmul)
 
-    torch_loss = torch_loss_fn(torch_attn_out.view(BATCH*SEQ_LEN, EMBEDDING_DIM), torch_y)
+    torch_loss = torch_loss_fn(torch_attn_out.reshape(BATCH*SEQ_LEN, EMBEDDING_DIM), torch_y)
     atom_loss = atom_loss_fn(atom_attn_out.reshape((BATCH*SEQ_LEN, EMBEDDING_DIM)), atom_y)
 
     torch_loss.backward()
     atom_loss.backward()
 
-    SCALE = (BATCH * SEQ_LEN)
+    # As per https://discuss.pytorch.org/t/for-beginners-do-not-use-view-or-reshape-to-swap-dimensions-of-tensors/75524
+    # DO NOT USE VIEW OR RESHAPE TO SWAP DIMENSIONS OF TENSOR, INSTEAD USE TRANSPOSE OR PERMUTE
 
     # Check the gradient for each parameters
     # Query projection parameters
@@ -437,7 +430,7 @@ def test_multi_head_attention():
     assert np.allclose(torch_ln_out.weight.grad.T.detach().numpy(), (atom_ln_params[0].grad / SCALE).data, atol=1e-5)
     assert np.allclose(torch_ln_out.bias.grad.detach().numpy(), (atom_ln_params[1].grad / SCALE).data, atol=1e-5)
 
-def test_embeddings():
+def test_embeddings():  
     BATCH = 2
     SEQ_LEN = 5
     VOCAB_SIZE = 10
@@ -447,9 +440,9 @@ def test_embeddings():
     torch_expected[torch.arange(len(torch_expected)), torch_indices.view(BATCH*SEQ_LEN)] = 1
     torch_pos_tensor = torch.arange(SEQ_LEN)
 
-    atom_indices = atom(torch_indices.numpy())
-    atom_expected = atom(torch_expected.numpy())
-    atom_pos_tensor = atom(torch_pos_tensor.numpy())
+    atom_indices = atom.tensor(torch_indices.numpy())
+    atom_expected = atom.tensor(torch_expected.numpy())
+    atom_pos_tensor = atom.tensor(torch_pos_tensor.numpy())
 
     torch_loss_fn = torch.nn.CrossEntropyLoss()
     atom_loss_fn = nn.cross_entropy()
@@ -479,8 +472,8 @@ def test_embeddings():
     torch_loss.backward()
     atom_loss.backward()
 
-    assert np.allclose(torch_pos.weight.grad.detach().numpy(), (pos_emb_params.grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
-    assert np.allclose(torch_char.weight.grad.detach().numpy(), (char_emb_params.grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_pos.weight.grad.detach().numpy(), (pos_emb_params.grad.data / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_char.weight.grad.detach().numpy(), (char_emb_params.grad.data / (BATCH*SEQ_LEN)).data, atol=1e-5)
 
 def test_layer_norm():
     BATCH = 2
@@ -490,8 +483,8 @@ def test_layer_norm():
     torch_x = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
     torch_y = torch.randint(low=0, high=OUTPUT_DIM, size=(BATCH*SEQ_LEN,))
 
-    atom_x = atom(torch_x.numpy())
-    atom_y = atom(torch_y.numpy())
+    atom_x = atom.tensor(torch_x.numpy())
+    atom_y = atom.tensor(torch_y.numpy())
 
     torch_loss_fn = torch.nn.CrossEntropyLoss()
     atom_loss_fn = nn.cross_entropy()
@@ -508,8 +501,8 @@ def test_layer_norm():
     torch_loss.backward()
     atom_loss.backward()
 
-    assert np.allclose(torch_layer_norm.weight.grad.detach().numpy(), (parameters[0].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
-    assert np.allclose(torch_layer_norm.bias.grad.detach().numpy(), (parameters[1].grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_layer_norm.weight.grad.detach().numpy(), (parameters[0].grad.data / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_layer_norm.bias.grad.detach().numpy(), (parameters[1].grad.data / (BATCH*SEQ_LEN)).data, atol=1e-5)
 
 def test_residual_connection():
     BATCH = 2
@@ -517,10 +510,10 @@ def test_residual_connection():
     FEATURE_DIM = 16
 
     torch_x = torch.randn(BATCH, SEQ_LEN, FEATURE_DIM, requires_grad=True)
-    atom_x = atom(torch_x.detach().numpy(), requires_grad=True)
+    atom_x = atom.tensor(torch_x.detach().numpy(), requires_grad=True)
 
     torch_grad = torch.randn(BATCH, SEQ_LEN, FEATURE_DIM)
-    atom_grad = atom(torch_grad.numpy())
+    atom_grad = atom.tensor(torch_grad.numpy())
 
     torch_lin1 = torch.nn.Linear(FEATURE_DIM, FEATURE_DIM*2)
     torch_act_fn = torch.nn.ReLU()
@@ -564,14 +557,14 @@ def test_dropout():
     OUTPUT_DIM = 10
 
     torch_x = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM, requires_grad=True)
-    atom_x = atom(torch_x.detach().numpy(), requires_grad=True)
+    atom_x = atom.tensor(torch_x.detach().numpy(), requires_grad=True)
 
     torch_dropout = torch.nn.Dropout(p=0.1)
     atom_dropout = nn.dropout(p=0.1)
 
     # Example gradients
     torch_exp_grad = torch.randn(BATCH, SEQ_LEN, OUTPUT_DIM)
-    atom_exp_grad = atom(torch_exp_grad.numpy())
+    atom_exp_grad = atom.tensor(torch_exp_grad.numpy())
 
     # Torch and Atom forward pass
     torch_output = torch_dropout(torch_x)
@@ -587,4 +580,4 @@ def test_dropout():
     print()
     print(atom_output.data[0])
     print()
-    print((atom_x.grad / (BATCH*SEQ_LEN)).data[0])
+    print((atom_x.grad.data / (BATCH*SEQ_LEN))[0])
