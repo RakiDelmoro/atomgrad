@@ -135,9 +135,13 @@ def torch_runner():
 
         t.set_description(f'Loss: {train_loss:.4f} Accuracy: {accuracies:.4f}')
 
-# Atom GPU behaves:
+# Atom previous GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
 # 0, Quadro RTX 4000, 8192 MiB, 4644 MiB, 3352 MiB, 71, P0, 78 %, 44 %
+
+# Atom refactored GPU behaves:
+# index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
+# 0, Quadro RTX 4000, 8192 MiB, 3241 MiB, 4755 MiB, 71, P0, 72 %, 43 %
 
 # Torch GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
@@ -146,5 +150,5 @@ def torch_runner():
 # TODO: Make atomgrad effecient as Pytorch
 # TODO: How can I make atomgrad memory efficient same as pytorch
 
-# atom_runner()
-torch_runner()
+atom_runner()
+# torch_runner()
