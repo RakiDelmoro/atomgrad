@@ -2,28 +2,51 @@ import cupy as cp
 import numpy as np
 from typing import Iterable, Tuple
 
-class atom:
-    def __init__(self, data,
-                 device: str = 'cpu',
-                 requires_grad: bool = False,
-                 depends_on: Tuple['atom', ...] = (),
-                 operation: str = '',
-                 grad_fn=None):
-
-        self.data = np.asarray(data, dtype=np.float32) if device == 'cpu' else cp.asarray(data, dtype=cp.float32)
+class LeafTensor:
+    def __init__(self, data, device='cpu', requires_grad=False, depends_on=[], operation='', grad_fn=None):
+        self.data = data
+        self.shape = data.shape
+        self.ndim = data.ndim
         self.device = device
-        self.ndim = self.data.ndim
-        self.shape = self.data.shape
         self.grad = None
-        self.requires_grad = requires_grad
+        self._retain_grad = False
 
-        # Graph bookkeeping
-        self._depends_on = depends_on
-        self._operation = operation
-        self._grad_fn = grad_fn
+        self.requires_grad = requires_grad
+        self.operation = operation
+        self.depends_on = depends_on
+        self.grad_fn = grad_fn
+
+    def retain_grad(self):
+        self._retain_grad = True
+
+    def __repr__(self):
+        if self.requires_grad != False:
+            if len(self.data.shape) == 0:
+                ret = f"tensor({self.data:.4f}, requires_grad={self.requires_grad})"
+            else:
+                ret = f"tensor({self.data.round(4)}, requires_grad={self.requires_grad})"
+        else:
+            if len(self.data.shape) == 0:
+                ret = f"tensor({self.data:.4f})"
+            else:
+                ret = f"tensor({self.data.round(4)})"
+
+        return ret
+    
+
+    def __pow__(self, other):
+        assert isinstance(other, (int, float)), "only supporting int/float powers for now"
+        result = self.data ** other
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(self, self.device) if self.grad is None else self.grad
+                self.grad.data += (other.data * self.data**(other.data-1)) * grad.data
+        out = LeafTensor(result, self.device, self.requires_grad, depends_on=[self,], operation='**', grad_fn=grad_fn)
+        return out
 
     def __mul__(self, other):
-        other = other if isinstance(other, atom) else atom(other)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
 
         requires_grad = self.requires_grad or other.requires_grad
@@ -33,24 +56,22 @@ class atom:
             if self.requires_grad:
                 self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == 1:
-                    self.grad += cp.sum(cp.sum(grad.data * other.data, axis=0), axis=0) if self.device == 'cuda' else np.sum(np.sum(grad.data * other.data, axis=0), axis=0)
+                    self.grad.data += cp.sum(cp.sum(grad.data * other.data, axis=0), axis=0) if self.device == 'cuda' else np.sum(np.sum(grad.data * other.data, axis=0), axis=0)
                 if self.ndim == grad.ndim:
-                    self.grad += atom(grad.data * other.data, self.device)
+                    self.grad.data += grad.data * other.data 
 
             if other.requires_grad:
                 other.grad = atom.zeros_like(other, other.device)
-                other.grad += grad * self
+                other.grad.data += grad.data * self.data
 
-        out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='*', grad_fn=grad_fn)
-
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self, other], operation='*', grad_fn=grad_fn)
         return out
 
     def __add__(self, other):
-        other = other if isinstance(other, atom) else atom(other)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
         
         requires_grad = self.requires_grad or other.requires_grad
-
         result = self.data + other.data
 
         def grad_fn(grad):
@@ -68,44 +89,43 @@ class atom:
                 self.grad = atom.zeros_like(self, self.device) if self.grad is None else self.grad
                 dim_diff = grad.ndim - self.grad.ndim
                 if dim_diff > 0:
-                    self.grad += atom(grad.data.sum(axis=tuple(range(dim_diff))), self.device)
+                    self.grad.data += grad.data.sum(axis=tuple(range(dim_diff)))
                 else:
-                    self.grad += grad
+                    self.grad.data += grad.data
             if other.requires_grad:
                 other.grad = atom.zeros_like(other, other.device) if other.grad is None else other.grad
                 dim_diff = grad.ndim - other.grad.ndim
                 if dim_diff > 0:
-                    other.grad += atom(grad.data.sum(axis=tuple(range(dim_diff))), self.device)
+                    other.grad.data += grad.data.sum(axis=tuple(range(dim_diff)))
                 else:
-                    other.grad += grad
+                    other.grad.data += grad.data
 
-        out = atom(result, requires_grad=requires_grad, device=self.device, depends_on=(self, other), operation='+', grad_fn=grad_fn)
-
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self, other], operation='+', grad_fn=grad_fn)
         return out
     
     def __truediv__(self, other):
-        other = other if isinstance(other, atom) else atom(other, self.device)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
         requires_grad = self.requires_grad or other.requires_grad
 
         result = self.data * other.data**-1
-        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='/')
 
         return out
     
     def __sub__(self, other):
-        other = other if isinstance(other, atom) else atom(other)
+        other = other if isinstance(other, atom) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
         requires_grad = self.requires_grad or other.requires_grad
 
         result = self.data + (-other.data)
-        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='-')
 
         return out
 
     def matmul(x1, x2):
-        x1 = x1 if isinstance(x1, atom) else atom(x1)
-        x2 = x2 if isinstance(x2, atom) else atom(x2)
+        x1 = x1 if isinstance(x1, (atom, LeafTensor)) else atom(x1)
+        x2 = x2 if isinstance(x2, (atom, LeafTensor)) else atom(x2)
         assert x1.device == x2.device, f'Must be same device'
 
         # Gather the shape of two arrays
@@ -129,77 +149,517 @@ class atom:
             if x1_ndim == 4 and x2_ndim == 4:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
-                    x1.grad += atom.matmul(grad, x2.transpose((0, 1, 3, 2)))
+                    x1.grad.data += atom.matmul(grad, x2.transpose((0, 1, 3, 2))).data
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
-                    x2.grad += atom.matmul(grad.transpose((0, 1, 3, 2)), x1).transpose((0, 1, 3, 2))
+                    x2.grad.data += atom.matmul(grad.transpose((0, 1, 3, 2)), x1).transpose((0, 1, 3, 2)).data
             elif x1_ndim == 4 and x2_ndim == 2:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
-                    x1.grad += atom.matmul(grad, x2.T())
+                    x1.grad.data += atom.matmul(grad, x2.T()).data
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
-                    x2.grad += atom(np.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0)).T() if x1.device == 'cpu' else atom(cp.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0)).T()
+                    x2.grad.data += np.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0).T() if x1.device == 'cpu' else cp.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0).T()
             elif x1_ndim == 3 and x2_ndim == 2:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
-                    x1.grad += atom.matmul(grad, x2.T())
+                    x1.grad.data += atom.matmul(grad, x2.T()).data
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
-                    x2.grad += atom(np.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0)).T() if x1.device == 'cpu' else atom(cp.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0)).T()
+                    x2.grad.data += np.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0).T() if x1.device == 'cpu' else cp.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0).T()
             elif x1_ndim == 2 and x2_ndim == 2:
                 if x1.requires_grad:
                     x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
                     if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.T)
-                    else: propagate_grad = cp.matmul(grad.data, x2.data.transpose(0,2,1))
-                    x1.grad += atom(propagate_grad)
+                    else: propagate_grad = cp.matmul(grad.data, x2.data.T)
+                    x1.grad.data += propagate_grad
                 if x2.requires_grad:
                     x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
                     if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.T, x1.data).T
                     else: propagate_grad = cp.matmul(grad.data.T, x1.data).T
-                    x2.grad += atom(propagate_grad)
+                    x2.grad.data += propagate_grad
 
-        out = atom(result, requires_grad=requires_grad, device=x1.device, depends_on=(x1, x2), operation='@', grad_fn=grad_fn)
+        out = LeafTensor(result, x1.device, requires_grad, depends_on=[x1, x2], operation='@', grad_fn=grad_fn)
     
         return out
 
     def __rmul__(self, other):
-        other = other if isinstance(other, atom) else atom(other)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
         requires_grad = self.requires_grad or other.requires_grad
 
         result = other.data * self.data
-        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='*')
 
         return out
 
     def __radd__(self, other):
-        other = other if isinstance(other, atom) else atom(other)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, device=self.device)
         assert self.device == other.device, f'Must be same device'
         requires_grad = self.requires_grad or other.requires_grad
 
         result = other.data + self.data
-        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='+')
 
         return out
     
     def __rsub__(self, other):
-        other = other if isinstance(other, atom) else atom(other)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
         requires_grad = self.requires_grad or other.requires_grad
 
         result = other.data + (-self.data)
-        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='-')
 
         return out
 
     def __rtruediv__(self, other):
-        other = other if isinstance(other, atom) else atom(other, self.device)
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
         assert self.device == other.device, f'Must be same device'
         requires_grad = self.requires_grad or other.requires_grad
 
         result = other.data * self.data**-1
-        out = atom(result, self.device, requires_grad, depends_on=(self, other), operation='-')
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='/')
+
+        return out
+
+    def T(self):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+        return LeafTensor(self.data.T, self.device, self.requires_grad)
+    
+    def transpose(self, dims=Iterable[int]):
+            result = self.data.transpose(dims)
+            def grad_fn(grad):
+                if self.requires_grad:
+                    self.grad = atom.zeros_like(result, self.device)
+
+                    self.grad.data += grad.data
+
+            return LeafTensor(result, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='transposed', grad_fn=grad_fn)
+    
+    def reshape(self, shape=Iterable[int]):
+        result = self.data.reshape(shape)
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(result, self.device)
+                
+                if grad.shape != self.grad.shape:
+                    grad.data = grad.data.transpose(0, 1, 3, 2)
+                    grad.shape = grad.data.shape
+                    grad.ndim = grad.data.ndim
+
+                self.grad.data += grad.data
+
+        return LeafTensor(result, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='reshaped', grad_fn=grad_fn)
+
+    def masked_fill(self, mask):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        if self.ndim == 2:
+            self.data[(mask == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+        elif self.ndim == 3:
+            self.data[:, (mask == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+        elif self.ndim == 4:
+            self.data[:, :, (mask == 1)] = -np.inf if self.device == 'cpu' else -cp.inf
+
+        return self
+
+    def softmax(self, dim):
+        device = self.device
+        assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
+
+        # Softmax
+        max_val_arr = np.max(self.data, axis=dim, keepdims=True) if self.device == 'cpu' else cp.max(self.data, axis=dim, keepdims=True)
+        shifted_data = self.data - max_val_arr
+        exp = np.exp(shifted_data) if self.device == 'cpu' else cp.exp(shifted_data)
+        sum_exp = np.sum(exp, axis=dim, keepdims=True)
+        applied_softmax = exp / sum_exp
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(self, self.device)
+                if self.ndim == grad.ndim:
+                    sum_term = (applied_softmax * grad.data).sum(axis=dim, keepdims=True)
+                    deriv = applied_softmax * (grad.data - sum_term)
+                    self.grad += atom(deriv, self.device)
+                else:
+                    grad = np.sum(grad.data, axis=-1)
+                    sum_term = (applied_softmax * grad).sum(axis=dim, keepdims=True)
+                    deriv = applied_softmax * (grad - sum_term)
+                    self.grad += atom(deriv, self.device)
+
+        out = LeafTensor(applied_softmax, self.device, self.requires_grad, [self,], 'softmax', grad_fn)
+
+        return out
+
+    def relu(self):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        # Relu
+        applied_relu = np.maximum(0, self.data) if self.device == 'cpu' else cp.maximum(0, self.data)
+        # out = atom(applied_relu, self.device, self.requires_grad, [self,], 'relu')
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(self, self.device)
+                if self.ndim == grad.ndim:
+                    if self.device == 'cpu':
+                        deriv = np.where(applied_relu > 0, 1, 0) * grad.data
+                    else:
+                        deriv = cp.where(applied_relu > 0, 1, 0) * grad.data
+                    grad_propagated = atom(deriv, self.device)
+                    self.grad += grad_propagated
+                else:
+                    if self.device == 'cpu':
+                        deriv = np.where(applied_relu > 0, 1, 0) * np.sum(grad.data, axis=-1)
+                    else:
+                        deriv = cp.where(applied_relu > 0, 1, 0) * cp.sum(grad.data, axis=-1)
+
+                    grad_propagated = atom(deriv, self.device)
+                    self.grad += grad_propagated
+
+        out = LeafTensor(applied_relu, self.device, self.requires_grad, [self,], 'relu', grad_fn)
+
+        return out
+    
+    def embeddings_(self, parameters):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        if self.device == 'cpu':
+            if np.any(self.data < 0) or np.any(self.data >= parameters.shape[0]):
+                raise ValueError(f"Indices out of range [0, {self.shape[0]-1}]")
+        else:
+            if cp.any(self.data < 0) or cp.any(self.data >= parameters.shape[0]):
+                raise ValueError(f"Indices out of range [0, {self.shape[0]-1}]")
+            
+        # result = atom(parameters.data[self.data.astype(int)], self.device, requires_grad=True, depends_on=[parameters,], operation='embeddings')
+
+        def grad_fn(grad):
+            parameters.grad = atom.zeros_like(parameters, parameters.device)
+
+            if self.ndim == 2:
+                indices = self.data.astype(int).reshape(-1)
+            else:
+                indices = self.data.astype(int)
+            
+            one_hot = atom(np.eye(parameters.shape[0], dtype=grad.data.dtype)[indices]) if self.device == 'cpu' else atom(cp.eye(parameters.shape[0], dtype=grad.data.dtype)[indices])
+            if grad.ndim > 2:
+                grad.data = grad.data.reshape(-1, grad.shape[-1])
+                grad.shape = grad.data.shape
+                grad.ndim = grad.data.ndim
+                propagate_grad = atom.matmul(one_hot.T(), grad)
+                parameters.grad += propagate_grad
+            else:
+                parameters.grad += grad
+        out = LeafTensor(parameters.data[self.data.astype(int)], self.device, True, [parameters,], 'embeddings', grad_fn)
+
+        return out
+    
+    def layer_norm_(self, eps):
+        mean = self.data.mean(axis=-1, keepdims=True)
+        std = self.data.std(axis=-1, keepdims=True)
+        centered = self.data - mean
+        denominator = std + eps
+        applied_layer_norm = centered / denominator
+
+        def grad_fn(grad):
+            mean_grad = grad.data.mean(axis=-1, keepdims=True)
+            sum_grad_centered = (grad.data * centered).sum(axis=-1, keepdims=True)     
+            term1 = (grad.data - mean_grad) / denominator
+            term2 = centered * sum_grad_centered / (applied_layer_norm.shape[-1] * std * denominator**2)
+
+            self.grad += atom(term1 - term2)
+        
+        out = LeafTensor(applied_layer_norm, self.device, True, [self,], 'layer_norm', grad_fn)
+
+        return out
+    
+    def dropout_(self, prob, train=True, mask=None):
+        scale = 1.0
+
+        if train and prob != 0:
+            if prob == 1:
+                mask = cp.zeros(self.shape, dtype=cp.bool_) if self.device == 'cuda' else np.zeros(self.shape, dtype=np.bool_)
+                dropped_out = atom.zeros_like(self, self.device)
+            else:
+                mask = cp.random.rand(*self.shape) > prob if self.device == 'cuda' else np.random.rand(*self.shape) > prob
+                scale = 1.0 / (1.0 - prob)
+                dropped_out = mask * self.data * scale
+            result = LeafTensor(dropped_out, self.device, self.requires_grad, [self,], 'dropout')
+        else:
+            result = self
+            if train and prob == 0:
+                mask = cp.ones(self.shape, dtype=cp.bool_) if self.device == 'cuda' else np.ones(self.shape, dtype=np.bool_)
+
+        def grad_fn(grad):
+            self.grad = atom.zeros_like(self, self.device)
+            if train:
+                if prob == 1:
+                    propagated_grad = atom.zeros_like(self, self.device).data
+                else:
+                    propagated_grad = grad.data * mask * scale
+            else:
+                propagated_grad = grad.data
+
+            self.grad.data += propagated_grad
+
+        result.grad_fn = grad_fn
+        return result
+
+    def log_softmax(self, dim):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        max_val_arr = np.max(self.data, axis=dim, keepdims=True) if self.device == 'cpu' else cp.max(self.data, axis=dim, keepdims=True)
+        shifted = self.data - max_val_arr
+        log_sum = np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True)) if self.device == 'cpu' else cp.log(cp.sum(cp.exp(shifted), axis=-1, keepdims=True))
+
+        return LeafTensor(shifted - log_sum, self.device, self.requires_grad, [self,], 'log_softmax')
+    
+    def backward(self, grad=None):
+        if not self.requires_grad: return
+
+        # Topo sort
+        topo, visited = [], set()
+        def build_topo(t):
+            if t in visited:
+                return
+
+            visited.add(t)
+
+            if hasattr(t, 'depends_on') and t.depends_on:
+                for d in t.depends_on:
+                    build_topo(d)
+            topo.append(t)
+        build_topo(self)
+
+        if grad is None:
+            grad_arr = np.ones_like(self.data) if self.device == 'cpu' else cp.ones_like(self.data)
+            self.grad = atom(grad_arr, self.device)
+        else:
+            self.grad = grad
+
+        for node in reversed(topo):
+            if isinstance(node, LeafTensor):
+                if node.grad_fn is not None:
+                    if node.operation == 'cross_entropy':
+                        if grad is None: cross_entropy_grad = node.depends_on[0].softmax(dim=-1) - node.depends_on[1]
+                        else: cross_entropy_grad = grad
+                        node.grad_fn(cross_entropy_grad)
+                    else:
+                        node.grad_fn(node.grad)
+
+                if not node._retain_grad:
+                    node.grad = None
+
+                node.grad_fn = None
+                node.depends_on = []            
+
+    def zero_grad(self):
+        arr = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
+        self.grad = None if self.grad is None else arr
+
+
+class atom:
+    def __init__(self, data, device: str = 'cpu', requires_grad: bool = False,):
+
+        self.data = np.array(data, dtype=np.float32) if device == 'cpu' else cp.array(data, dtype=cp.float32)
+        self.device = device
+        self.ndim = self.data.ndim
+        self.shape = self.data.shape
+        self.grad = None
+        self.requires_grad = requires_grad
+
+    @staticmethod
+    def tensor(data, device='cpu', requires_grad=False):
+        return atom(data, device=device, requires_grad=requires_grad)
+
+    def __pow__(self, other):
+        assert isinstance(other, (int, float)), "only supporting int/float powers for now"
+        result = self.data ** other
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(self, self.device) if self.grad is None else self.grad
+                self.grad.data += (other.data * self.data**(other.data-1)) * grad.data
+        out = LeafTensor(result, self.device, self.requires_grad, depends_on=[self,], operation='**', grad_fn=grad_fn)
+        return out
+
+    def __mul__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+
+        requires_grad = self.requires_grad or other.requires_grad
+        result = self.data * other.data
+
+        def grad_fn(grad):
+            if self.requires_grad:
+                self.grad = atom.zeros_like(self, self.device)
+                if self.ndim == 1:
+                    self.grad.data += cp.sum(cp.sum(grad.data * other.data, axis=0), axis=0) if self.device == 'cuda' else np.sum(np.sum(grad.data * other.data, axis=0), axis=0)
+                if self.ndim == grad.ndim:
+                    self.grad.data += grad.data * other.data 
+
+            if other.requires_grad:
+                other.grad = atom.zeros_like(other, other.device)
+                other.grad.data += grad.data * self.data
+
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self, other], operation='*', grad_fn=grad_fn)
+        return out
+
+    def __add__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        
+        requires_grad = self.requires_grad or other.requires_grad
+        result = self.data + other.data
+
+        def grad_fn(grad):
+            if self.ndim != grad.ndim:
+                grad.data = grad.data.reshape(self.shape)
+                grad.shape = grad.data.shape
+                grad.ndim = grad.data.ndim
+
+            if self.ndim == grad.ndim:
+                if self.shape != grad.shape:
+                    grad.data = grad.data.reshape(self.shape)
+                    grad.shape = grad.data.shape
+
+            if self.requires_grad:
+                self.grad = atom.zeros_like(self, self.device) if self.grad is None else self.grad
+                dim_diff = grad.ndim - self.grad.ndim
+                if dim_diff > 0:
+                    self.grad.data += grad.data.sum(axis=tuple(range(dim_diff)))
+                else:
+                    self.grad.data += grad.data
+            if other.requires_grad:
+                other.grad = atom.zeros_like(other, other.device) if other.grad is None else other.grad
+                dim_diff = grad.ndim - other.grad.ndim
+                if dim_diff > 0:
+                    other.grad.data += grad.data.sum(axis=tuple(range(dim_diff)))
+                else:
+                    other.grad.data += grad.data
+
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self, other], operation='+', grad_fn=grad_fn)
+        return out
+    
+    def __truediv__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = self.data * other.data**-1
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='/')
+
+        return out
+    
+    def __sub__(self, other):
+        other = other if isinstance(other, atom) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = self.data + (-other.data)
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='-')
+
+        return out
+
+    def matmul(x1, x2):
+        x1 = x1 if isinstance(x1, (atom, LeafTensor)) else atom(x1)
+        x2 = x2 if isinstance(x2, (atom, LeafTensor)) else atom(x2)
+        assert x1.device == x2.device, f'Must be same device'
+
+        # Gather the shape of two arrays
+        x1_shape, x2_shape = x1.shape, x2.shape
+        x1_ndim, x2_ndim = x1.ndim, x2.ndim
+
+        if x1_ndim != 3 or x2_ndim != 3:
+            result = np.matmul(x1.data, x2.data) if x1.device == 'cpu' else cp.matmul(x1.data, x2.data)
+        else:
+            if x1_shape[-1] != x2_shape[-1]:
+                result = np.matmul(x1.data, x2.data) if x1.device == 'cpu' else cp.matmul(x1.data, x2.data)
+            else:
+                result = np.matmul(x1.data, x2.data).transpose(0, 2, 1) if x1.device == 'cpu' else cp.matmul(x1.data, x2.data).transpose(0, 2, 1)
+
+        requires_grad = x1.requires_grad or x2.requires_grad
+
+        def grad_fn(grad):
+            if x1.ndim != grad.ndim and x2.ndim != grad.ndim:
+                grad.data = grad.data.reshape(x2.shape)
+
+            if x1_ndim == 4 and x2_ndim == 4:
+                if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
+                    x1.grad.data += atom.matmul(grad, x2.transpose((0, 1, 3, 2))).data
+                if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
+                    x2.grad.data += atom.matmul(grad.transpose((0, 1, 3, 2)), x1).transpose((0, 1, 3, 2)).data
+            elif x1_ndim == 4 and x2_ndim == 2:
+                if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
+                    x1.grad.data += atom.matmul(grad, x2.T()).data
+                if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
+                    x2.grad.data += np.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0).T if x1.device == 'cpu' else cp.matmul(grad.data.transpose(0,1,3,2), x1.data).sum(axis=0).sum(axis=0).T
+            elif x1_ndim == 3 and x2_ndim == 2:
+                if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
+                    x1.grad.data += atom.matmul(grad, x2.T()).data
+                if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
+                    x2.grad.data += np.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0).T if x1.device == 'cpu' else cp.matmul(grad.data.transpose(0,2,1), x1.data).sum(axis=0).T
+            elif x1_ndim == 2 and x2_ndim == 2:
+                if x1.requires_grad:
+                    x1.grad = atom.zeros_like(x1, x1.device) if x1.grad is None else x1.grad
+                    if x1.device == 'cpu': propagate_grad = np.matmul(grad.data, x2.data.T)
+                    else: propagate_grad = cp.matmul(grad.data, x2.data.T)
+                    x1.grad.data += propagate_grad
+                if x2.requires_grad:
+                    x2.grad = atom.zeros_like(x2, x2.device) if x2.grad is None else x2.grad
+                    if x2.device == 'cpu': propagate_grad = np.matmul(grad.data.T, x1.data).T
+                    else: propagate_grad = cp.matmul(grad.data.T, x1.data).T
+                    x2.grad.data += propagate_grad
+
+        out = LeafTensor(result, x1.device, requires_grad, depends_on=[x1, x2], operation='@', grad_fn=grad_fn)
+    
+        return out
+
+    def __rmul__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = other.data * self.data
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='*')
+
+        return out
+
+    def __radd__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, device=self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = other.data + self.data
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='+')
+
+        return out
+    
+    def __rsub__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = other.data + (-self.data)
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='-')
+
+        return out
+
+    def __rtruediv__(self, other):
+        other = other if isinstance(other, (atom, LeafTensor)) else atom(other, self.device)
+        assert self.device == other.device, f'Must be same device'
+        requires_grad = self.requires_grad or other.requires_grad
+
+        result = other.data * self.data**-1
+        out = LeafTensor(result, self.device, requires_grad, depends_on=[self,other], operation='/')
 
         return out
 
@@ -249,10 +709,7 @@ class atom:
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
 
         arr = np.random.randn(*shape).astype(np.float32) if device == 'cpu' else cp.random.randn(*shape, dtype=cp.float32)
-
         ret = atom(arr, device=device, requires_grad=requires_grad)
-        def grad_fn(grad): ret.grad = grad
-        ret._grad_fn = grad_fn if requires_grad else None
 
         return ret
 
@@ -279,10 +736,7 @@ class atom:
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
 
         arr = np.random.randint(low, high, size, dtype=np.longlong) if device == 'cpu' else cp.random.randint(low, high, size, dtype=cp.longlong)
-
         ret = atom(arr, device=device, requires_grad=requires_grad)
-        def grad_fn(grad): ret.grad = grad
-        ret._grad_fn = grad_fn if requires_grad else None
 
         return ret
 
@@ -334,22 +788,21 @@ class atom:
         sum_exp = np.sum(exp, axis=dim, keepdims=True)
         applied_softmax = exp / sum_exp
 
-        out = atom(applied_softmax, self.device, self.requires_grad, [self,], 'softmax')
-
         def grad_fn(grad):
             if self.requires_grad:
                 self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == grad.ndim:
-                    sum_term = (out.data * grad.data).sum(axis=dim, keepdims=True)
-                    deriv = out.data * (grad.data - sum_term)
+                    sum_term = (applied_softmax * grad.data).sum(axis=dim, keepdims=True)
+                    deriv = applied_softmax * (grad.data - sum_term)
                     self.grad += atom(deriv, self.device)
                 else:
                     grad = np.sum(grad.data, axis=-1)
-                    sum_term = (out.data * grad).sum(axis=dim, keepdims=True)
-                    deriv = out.data * (grad - sum_term)
+                    sum_term = (applied_softmax * grad).sum(axis=dim, keepdims=True)
+                    deriv = applied_softmax * (grad - sum_term)
                     self.grad += atom(deriv, self.device)
 
-        out._grad_fn = grad_fn
+        out = LeafTensor(applied_softmax, self.device, self.requires_grad, [self,], 'softmax', grad_fn)
+
         return out
 
     def relu(self):
@@ -357,28 +810,29 @@ class atom:
 
         # Relu
         applied_relu = np.maximum(0, self.data) if self.device == 'cpu' else cp.maximum(0, self.data)
-        out = atom(applied_relu, self.device, self.requires_grad, [self,], 'relu')
+        # out = atom(applied_relu, self.device, self.requires_grad, [self,], 'relu')
 
         def grad_fn(grad):
             if self.requires_grad:
                 self.grad = atom.zeros_like(self, self.device)
                 if self.ndim == grad.ndim:
                     if self.device == 'cpu':
-                        deriv = np.where(out.data > 0, 1, 0) * grad.data
+                        deriv = np.where(applied_relu > 0, 1, 0) * grad.data
                     else:
-                        deriv = cp.where(out.data > 0, 1, 0) * grad.data
+                        deriv = cp.where(applied_relu > 0, 1, 0) * grad.data
                     grad_propagated = atom(deriv, self.device)
                     self.grad += grad_propagated
                 else:
                     if self.device == 'cpu':
-                        deriv = np.where(out.data > 0, 1, 0) * np.sum(grad.data, axis=-1)
+                        deriv = np.where(applied_relu > 0, 1, 0) * np.sum(grad.data, axis=-1)
                     else:
-                        deriv = cp.where(out.data > 0, 1, 0) * cp.sum(grad.data, axis=-1)
+                        deriv = cp.where(applied_relu > 0, 1, 0) * cp.sum(grad.data, axis=-1)
 
                     grad_propagated = atom(deriv, self.device)
                     self.grad += grad_propagated
 
-        out._grad_fn = grad_fn
+        out = LeafTensor(applied_relu, self.device, self.requires_grad, [self,], 'relu', grad_fn)
+
         return out
     
     def embeddings_(self, parameters):
@@ -391,7 +845,7 @@ class atom:
             if cp.any(self.data < 0) or cp.any(self.data >= parameters.shape[0]):
                 raise ValueError(f"Indices out of range [0, {self.shape[0]-1}]")
             
-        result = atom(parameters.data[self.data.astype(int)], self.device, requires_grad=True, depends_on=[parameters,], operation='embeddings')
+        # result = atom(parameters.data[self.data.astype(int)], self.device, requires_grad=True, depends_on=[parameters,], operation='embeddings')
 
         def grad_fn(grad):
             parameters.grad = atom.zeros_like(parameters, parameters.device)
@@ -410,31 +864,30 @@ class atom:
                 parameters.grad += propagate_grad
             else:
                 parameters.grad += grad
+        out = LeafTensor(parameters.data[self.data.astype(int)], self.device, True, [parameters,], 'embeddings', grad_fn)
 
-        result._grad_fn = grad_fn
-        return result
+        return out
     
     def layer_norm_(self, eps):
         mean = self.data.mean(axis=-1, keepdims=True)
         std = self.data.std(axis=-1, keepdims=True)
         centered = self.data - mean
         denominator = std + eps
-
-        result = atom((centered / denominator), self.device, requires_grad=True, depends_on=[self,], operation='layer_norm')
+        applied_layer_norm = centered / denominator
 
         def grad_fn(grad):
             mean_grad = grad.data.mean(axis=-1, keepdims=True)
             sum_grad_centered = (grad.data * centered).sum(axis=-1, keepdims=True)     
             term1 = (grad.data - mean_grad) / denominator
-            term2 = centered * sum_grad_centered / (result.data.shape[-1] * std * denominator**2)
+            term2 = centered * sum_grad_centered / (applied_layer_norm.shape[-1] * std * denominator**2)
 
             self.grad += atom(term1 - term2)
         
-        result._grad_fn = grad_fn
-        return result
+        out = LeafTensor(applied_layer_norm, self.device, True, [self,], 'layer_norm', grad_fn)
+
+        return out
     
     def dropout_(self, prob, train=True, mask=None):
-        # mask = None
         scale = 1.0
 
         if train and prob != 0:
@@ -445,27 +898,25 @@ class atom:
                 mask = cp.random.rand(*self.shape) > prob if self.device == 'cuda' else np.random.rand(*self.shape) > prob
                 scale = 1.0 / (1.0 - prob)
                 dropped_out = mask * self.data * scale
-            result = atom(dropped_out, requires_grad=True)
+            result = LeafTensor(dropped_out, self.device, self.requires_grad, [self,], 'dropout')
         else:
             result = self
             if train and prob == 0:
                 mask = cp.ones(self.shape, dtype=cp.bool_) if self.device == 'cuda' else np.ones(self.shape, dtype=np.bool_)
 
-        result._depends_on = [self,]
-
         def grad_fn(grad):
             self.grad = atom.zeros_like(self, self.device)
             if train:
                 if prob == 1:
-                    propagated_grad = atom.zeros_like(self, self.device)
+                    propagated_grad = atom.zeros_like(self, self.device).data
                 else:
-                    propagated_grad = atom(grad.data * mask * scale)
+                    propagated_grad = grad.data * mask * scale
             else:
-                propagated_grad = grad
+                propagated_grad = grad.data
 
-            self.grad += propagated_grad
+            self.grad.data += propagated_grad
 
-        result._grad_fn = grad_fn
+        result.grad_fn = grad_fn
         return result
 
     def log_softmax(self, dim):
@@ -475,7 +926,7 @@ class atom:
         shifted = self.data - max_val_arr
         log_sum = np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True)) if self.device == 'cpu' else cp.log(cp.sum(cp.exp(shifted), axis=-1, keepdims=True))
 
-        return atom(shifted - log_sum, self.device, self.requires_grad, self._depends_on)
+        return LeafTensor(shifted - log_sum, self.device, self.requires_grad, [self,], 'log_softmax')
 
     def one_hot(self, num_classes):
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
@@ -486,7 +937,7 @@ class atom:
         else:
             one_hot_arr[cp.arange(len(self.data)), self.data.astype(cp.longlong)] = 1
 
-        return atom(one_hot_arr, self.device, self.requires_grad, self._depends_on)
+        return atom(one_hot_arr, self.device, self.requires_grad)
     
     def T(self):
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
@@ -498,9 +949,9 @@ class atom:
                 if self.requires_grad:
                     self.grad = atom.zeros_like(result, self.device)
 
-                    self.grad += grad
+                    self.grad.data += grad.data
 
-            return atom(result, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='transposed', grad_fn=grad_fn)
+            return atom(result, device=self.device, requires_grad=self.requires_grad)
     
     def reshape(self, shape=Iterable[int]):
         result = self.data.reshape(shape)
@@ -514,44 +965,13 @@ class atom:
                     grad.shape = grad.data.shape
                     grad.ndim = grad.data.ndim
 
-                self.grad += grad
+                self.grad.data += grad.data
 
-        return atom(result, device=self.device, requires_grad=self.requires_grad, depends_on=[self,], operation='reshaped', grad_fn=grad_fn)
+        return atom(result, device=self.device, requires_grad=self.requires_grad)
 
-    def zeros_like(atom_tensor, device):
+    def zeros_like(atom_tensor, device='cpu', requires_grad=False):
         assert device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {device}'
         result = np.zeros_like(atom_tensor.data) if device == 'cpu' else cp.zeros_like(atom_tensor.data)
 
-        return atom(result, device)
+        return atom(result, device, requires_grad)
 
-    def backward(self, grad=None):
-        if not self.requires_grad: return
-
-        # Topo sort
-        topo, visited = [], set()
-        def build_topo(t):
-            if t not in visited:
-                visited.add(t)
-                for d in t._depends_on:
-                    build_topo(d)
-                topo.append(t)
-        build_topo(self)
-
-        if grad is None:
-            grad_arr = np.ones_like(self.data) if self.device == 'cpu' else cp.ones_like(self.data)
-            self.grad = atom(grad_arr, self.device)
-        else:
-            self.grad = grad
-
-        for node in reversed(topo):
-            if node._grad_fn is not None:
-                if node._operation == 'cross_entropy':
-                    if grad is None: cross_entropy_grad = node._depends_on[0].softmax(dim=-1) - node._depends_on[1]
-                    else: cross_entropy_grad = grad
-                    node._grad_fn(cross_entropy_grad)
-                else:
-                    node._grad_fn(node.grad)
-
-    def zero_grad(self):
-        arr = np.zeros_like(self.data) if self.device == 'cpu' else cp.zeros_like(self.data)
-        self.grad = None if self.grad is None else arr
