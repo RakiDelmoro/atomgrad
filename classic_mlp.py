@@ -139,7 +139,7 @@ def torch_runner():
 
 # Atom refactored v2 GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
-# 0, Quadro RTX 4000, 8192 MiB, 2582 MiB, 5414 MiB, 78, P0, 74 %, 46 %
+# 0, Quadro RTX 4000, 8192 MiB, 2747 MiB, 5249 MiB, 78, P0, 75 %, 48 %
 
 # Torch GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
