@@ -1,7 +1,7 @@
 import math
 import cupy as cp
 import numpy as np
-from tensor import atom, LeafTensor
+from tensor import atom
 
 class Parameter:
     def __init__(self, data, requires_grad=True):
@@ -183,7 +183,8 @@ def cross_entropy():
             model_output.grad = grad
             expected_output.grad = grad
 
-        scalar_loss = LeafTensor(avg_loss, model_output.device, model_output.requires_grad, depends_on=[model_output, expected_output], operation='cross_entropy', grad_fn=grad_fn)
+        scalar_loss = atom(avg_loss, model_output.device, model_output.requires_grad, 'cross_entropy', [model_output, expected_output], grad_fn)
+        scalar_loss.is_leaf = False
 
         return scalar_loss
     
