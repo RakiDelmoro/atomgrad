@@ -41,14 +41,11 @@ def atom_runner():
         for batched_image, batched_label in train_loader:
             batched_image = atom(batched_image, device=DEVICE)
             batched_label = atom(batched_label, device=DEVICE)
-
             batch = batched_image.shape[0]
-
             # Forward pass: linear 1 -> activation fn -> linear 2
             model_prediction = linear_2(activation(linear_1(batched_image)))
-
             avg_loss = loss_fn(model_prediction, batched_label)
-            
+
             zero_grad()
             avg_loss.backward()
             step(batch)
@@ -60,12 +57,9 @@ def atom_runner():
         for batched_image, batched_label in test_loader:
             batched_image = atom(batched_image, requires_grad=True, device=DEVICE)
             batched_label = atom(batched_label, device=DEVICE)
-
             model_pred_probabilities = linear_2(activation(linear_1(batched_image))).data
             batch_accuracy = (model_pred_probabilities.argmax(axis=-1) == batched_label.data).mean()
-
             accuracies.append(batch_accuracy)
-
         train_loss = sum(train_loss) / len(train_loss)
         accuracies = sum(accuracies) / len(accuracies)
 
@@ -139,9 +133,13 @@ def torch_runner():
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
 # 0, Quadro RTX 4000, 8192 MiB, 4644 MiB, 3352 MiB, 71, P0, 78 %, 44 %
 
-# Atom refactored GPU behaves:
+# Atom refactored v1 GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
 # 0, Quadro RTX 4000, 8192 MiB, 3241 MiB, 4755 MiB, 71, P0, 72 %, 43 %
+
+# Atom refactored v2 GPU behaves:
+# index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
+# 0, Quadro RTX 4000, 8192 MiB, 2582 MiB, 5414 MiB, 78, P0, 74 %, 46 %
 
 # Torch GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
