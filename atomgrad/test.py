@@ -349,10 +349,10 @@ def test_multi_head_attention():
     SCALE = (BATCH * SEQ_LEN)
 
     torch_x_emb = torch.randn(BATCH, SEQ_LEN, EMBEDDING_DIM)
-    atom_x_emb = atom(torch_x_emb.numpy(), requires_grad=True)
+    atom_x_emb = atom.tensor(torch_x_emb.numpy())
 
     torch_y = torch.randint(low=0, high=EMBEDDING_DIM, size=(BATCH*SEQ_LEN,))
-    atom_y = atom(torch_y.numpy())
+    atom_y = atom.tensor(torch_y.numpy())
 
     torch_tril = torch.tril(torch.ones((SEQ_LEN, SEQ_LEN)))
     atom_tril = atom.tril(atom.ones((SEQ_LEN, SEQ_LEN)))
@@ -472,8 +472,8 @@ def test_embeddings():
     torch_loss.backward()
     atom_loss.backward()
 
-    assert np.allclose(torch_pos.weight.grad.detach().numpy(), (pos_emb_params.grad.data / (BATCH*SEQ_LEN)).data, atol=1e-5)
-    assert np.allclose(torch_char.weight.grad.detach().numpy(), (char_emb_params.grad.data / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_pos.weight.grad.detach().numpy(), (pos_emb_params.grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
+    assert np.allclose(torch_char.weight.grad.detach().numpy(), (char_emb_params.grad / (BATCH*SEQ_LEN)).data, atol=1e-5)
 
 def test_layer_norm():
     BATCH = 2
