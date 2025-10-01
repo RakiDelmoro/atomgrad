@@ -585,17 +585,27 @@ class atom:
         else:
             self.grad = grad
 
+        scale = 0
         for node in reversed(topo):
             if node.grad_fn is not None:
                 if node.operation == 'cross_entropy':
                     if grad is None: cross_entropy_grad = node.depends_on[0].softmax(dim=-1) - node.depends_on[1]
                     else: cross_entropy_grad = grad
                     node.grad_fn(cross_entropy_grad)
+                    scale = node.depends_on[0].shape[0]
                 else:
                     node.grad_fn(node.grad)
+                    scale = 1 if scale == 0 else scale
 
-            if not node._retain_grad_ and not node.is_leaf:
-                node.grad = None
+            # If node is an activation of the network
+            if node.requires_grad and not node.is_leaf:
+                node.grad = None if not node._retain_grad_ else node.grad.data / scale
+                if node.operation != 'cross_entropy':
+                    node.data = None
+        
+            # If node is parameter  
+            if node.requires_grad and node.is_leaf:
+                node.grad.data = node.grad.data / scale
 
             node.grad_fn = None
             node.depends_on = None
