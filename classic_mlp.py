@@ -20,17 +20,17 @@ def atom_runner():
     assert train_images.shape[0] == train_labels.shape[0]
     assert test_images.shape[0] == test_labels.shape[0]
     assert train_images.shape[1] == test_images.shape[1] == IMAGE_HEIGHT*IMAGE_WIDTH
-    
-    # Initialize Model
-    parameters = []
-    linear_1, params_1 = nn.linear(784, 2000, device=DEVICE)
-    activation = nn.relu()
-    linear_2, params_2 = nn.linear(2000, 10, device=DEVICE)
-    parameters.extend(params_1)
-    parameters.extend(params_2)
 
+    class MLP:
+        def __init__(self):
+            self.linear_1, self.linear_1_params = nn.linear(784, 2000, device=DEVICE)
+            self.linear_2, self.linear_2_params = nn.linear(2000, 10, device=DEVICE)
+        def __call__(self, x: atom):
+            return self.linear_2(self.linear_1(x).relu())
+
+    model = MLP()
+    step, zero_grad = optim.Adam([model.linear_1_params, model.linear_2_params], lr=LEARNING_RATE)
     loss_fn = nn.cross_entropy()
-    step, zero_grad = optim.Adam(parameters, lr=LEARNING_RATE)
 
     for _ in (t := tqdm.trange(MAX_EPOCHS)):
         train_loader = mnist_dataloader(train_images, train_labels, batch_size=BATCH_SIZE, shuffle=True)
@@ -42,7 +42,7 @@ def atom_runner():
             batched_image = atom(batched_image, device=DEVICE)
             batched_label = atom(batched_label, device=DEVICE)
             # Forward pass: linear 1 -> activation fn -> linear 2
-            model_prediction = linear_2(activation(linear_1(batched_image)))
+            model_prediction = model(batched_image)
             avg_loss = loss_fn(model_prediction, batched_label)
 
             zero_grad()
@@ -56,7 +56,7 @@ def atom_runner():
         for batched_image, batched_label in test_loader:
             batched_image = atom(batched_image, requires_grad=True, device=DEVICE)
             batched_label = atom(batched_label, device=DEVICE)
-            model_pred_probabilities = linear_2(activation(linear_1(batched_image))).data
+            model_pred_probabilities = model(batched_image).data
             batch_accuracy = (model_pred_probabilities.argmax(axis=-1) == batched_label.data).mean()
             accuracies.append(batch_accuracy)
         train_loss = sum(train_loss) / len(train_loss)
