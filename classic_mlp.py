@@ -41,14 +41,13 @@ def atom_runner():
         for batched_image, batched_label in train_loader:
             batched_image = atom(batched_image, device=DEVICE)
             batched_label = atom(batched_label, device=DEVICE)
-            batch = batched_image.shape[0]
             # Forward pass: linear 1 -> activation fn -> linear 2
             model_prediction = linear_2(activation(linear_1(batched_image)))
             avg_loss = loss_fn(model_prediction, batched_label)
 
             zero_grad()
             avg_loss.backward()
-            step(batch)
+            step()
 
             train_loss.append(avg_loss.data.item())
 
@@ -129,6 +128,9 @@ def torch_runner():
 
         t.set_description(f'Loss: {train_loss:.4f} Accuracy: {accuracies:.4f}')
 
+atom_runner()
+# torch_runner()
+
 # Atom previous GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
 # 0, Quadro RTX 4000, 8192 MiB, 4644 MiB, 3352 MiB, 71, P0, 78 %, 44 %
@@ -141,6 +143,10 @@ def torch_runner():
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
 # 0, Quadro RTX 4000, 8192 MiB, 2747 MiB, 5249 MiB, 78, P0, 75 %, 48 %
 
+# Atom refactored v3 GPU behaves:
+# index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
+# 0, Quadro RTX 4000, 8192 MiB, 1651 MiB, 6345 MiB, 82, P0, 74 %, 46 %
+
 # Torch GPU behaves:
 # index, name, memory.total [MiB], memory.used [MiB], memory.free [MiB], temperature.gpu, pstate, utilization.gpu [%], utilization.memory [%]
 # 0, Quadro RTX 4000, 8192 MiB, 1577 MiB, 6419 MiB, 76, P0, 76 %, 24 %
@@ -148,5 +154,4 @@ def torch_runner():
 # TODO: Make atomgrad effecient as Pytorch
 # TODO: How can I make atomgrad memory efficient same as pytorch
 
-atom_runner()
-# torch_runner()
+
