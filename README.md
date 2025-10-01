@@ -9,10 +9,11 @@
        src="https://github.com/user-attachments/assets/f7c171b7-f803-4592-8bd2-26489afc3e60">
 </picture>
 
-atomgrad: autograd for numpy/cupy, to learn how autograd and neural network trains under the hood.
+atomgrad: autograd for numpy/cupy and learn how neural network trains under the hood.
 
 
 </div>
+
 
 
 
