@@ -511,6 +511,16 @@ class atom:
 
         return atom(one_hot_arr, self.device, self.requires_grad)
     
+    def sqrt(self):
+        assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
+
+        if self.device == 'cpu':
+            ret = np.sqrt(self.data)
+        else:
+            ret = cp.sqrt(self.data)
+
+        return atom(ret, self.device, self.requires_grad)
+
     def T(self):
         assert self.device in ['cpu', 'cuda'], f'Tensor must be cpu or cuda, got {self.device}'
         return atom(self.data.T, self.device, self.requires_grad)
