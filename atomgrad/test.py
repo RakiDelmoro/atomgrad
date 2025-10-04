@@ -553,13 +553,31 @@ def test_residual_connection():
     print(atom_x.grad.data[0])
     print(torch_x.grad[0])
 
-    # assert np.allclose(torch_x.grad.detach().numpy(), atom_x.grad.data, atol=1e-5)
-    # # Linear 1 parameters
-    # assert np.allclose(torch_lin1.weight.grad.T.detach().numpy(), atom_lin1_params[0].grad.data, atol=1e-5)
-    # assert np.allclose(torch_lin1.bias.grad.detach().numpy(), atom_lin1_params[1].grad.data, atol=1e-5)
-    # # Linear 2 parameters
-    # assert np.allclose(torch_lin2.weight.grad.T.detach().numpy(), atom_lin2_params[0].grad.data, atol=1e-5)
-    # assert np.allclose(torch_lin2.bias.grad.detach().numpy(), atom_lin2_params[1].grad.data, atol=1e-5) 
+    assert np.allclose(torch_x.grad.detach().numpy(), atom_x.grad.data, atol=1e-5)
+    # Linear 1 parameters
+    assert np.allclose(torch_lin1.weight.grad.T.detach().numpy(), atom_lin1_params[0].grad.data, atol=1e-5)
+    assert np.allclose(torch_lin1.bias.grad.detach().numpy(), atom_lin1_params[1].grad.data, atol=1e-5)
+    # Linear 2 parameters
+    assert np.allclose(torch_lin2.weight.grad.T.detach().numpy(), atom_lin2_params[0].grad.data, atol=1e-5)
+    assert np.allclose(torch_lin2.bias.grad.detach().numpy(), atom_lin2_params[1].grad.data, atol=1e-5) 
+
+def test_rnn_cell():
+    torch_inp_state = torch.randn(2, 10)
+    torch_hid_state = torch.randn(2, 5)
+    atom_inp_state = atom.tensor(torch_inp_state.numpy())
+    atom_hid_state = atom.tensor(torch_hid_state.numpy())
+    
+    torch_rnn_cell = torch.nn.RNNCell(10, 5, nonlinearity='relu')
+    inp_to_hid_params = [atom(torch_rnn_cell.weight_ih.T.detach().numpy()), atom(torch_rnn_cell.bias_ih.detach().numpy())]
+    hid_to_hid_params = [atom(torch_rnn_cell.weight_hh.T.detach().numpy()), atom(torch_rnn_cell.bias_hh.detach().numpy())]
+
+    atom_rnn_cell, _ = nn.rnn_cell(10, 5, parameters=[inp_to_hid_params, hid_to_hid_params])
+
+    torch_out = torch_rnn_cell(torch_inp_state, torch_hid_state)
+    atom_out = atom_rnn_cell(atom_inp_state, atom_hid_state)
+
+    assert np.allclose(torch_out.detach().numpy(), atom_out.data, atol=1e-5)
+
 
 @pytest.mark.skip(reason="This test is currently not relevant.")
 def test_dropout():
@@ -592,3 +610,4 @@ def test_dropout():
     print(atom_output.data[0])
     print()
     print((atom_x.grad.data)[0])
+
