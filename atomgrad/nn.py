@@ -103,6 +103,23 @@ def linear(input_size, output_size, device='cpu', bias=True, parameters=None):
 
     return forward, learnable_params
 
+def rnn_cell(input_size, hidden_size, device='cpu', bias=True, parameters=[None, None]):
+    inp_to_hid_params = parameters[0]
+    hid_to_hid_params = parameters[1]
+
+    inp_to_hid_layer, params1 = linear(input_size, hidden_size, device, bias, parameters=inp_to_hid_params)
+    hid_to_hid_layer, params2 = linear(hidden_size, hidden_size, device, bias, parameters=hid_to_hid_params)
+
+    learnable_params = [params1, params2]
+
+    def forward(input_state, hidden_state):
+        inp_to_hid_activation = inp_to_hid_layer(input_state)
+        hid_to_hid_activation = hid_to_hid_layer(hidden_state)
+
+        return (inp_to_hid_activation + hid_to_hid_activation).relu()
+    
+    return forward, learnable_params
+
 def embeddings(num_embeddings, embedding_dim, device='cpu', parameters=None):
     learnable_params = embeddinigs_params_init(num_embeddings, embedding_dim, device)
 
@@ -165,12 +182,11 @@ def cross_entropy():
         assert expected_output.data.dtype in [cp.float32, np.float32], f'model output should have float32 dtype, got {expected_output.data.dtype}'
 
         if expected_output.ndim == 1:
-            zeros_arr = np.zeros(model_output.shape) if model_output.device == 'cpu' else cp.zeros(model_output.shape)
+            zeros_arr = np.zeros(model_output.shape, dtype=model_output.data.dtype) if model_output.device == 'cpu' else cp.zeros(model_output.shape)
             arrange = np.arange(len(model_output.data)) if model_output.device == 'cpu' else cp.arange(len(model_output.data))
             data_type = np.longlong if model_output.device == 'cpu' else cp.longlong
             zeros_arr[arrange, expected_output.data.astype(data_type)] = 1
-            expected_output.data = zeros_arr
-            expected_output.shape = zeros_arr.shape
+            expected_output = atom.tensor(zeros_arr, model_output.device)
         else:
             expected_output = expected_output
 
