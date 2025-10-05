@@ -65,7 +65,13 @@ if __name__ == "__main__":
     # Run dynamic routing
     output, voting = dynamic_routing(first_agents_outputs, each_agents_weights, num_iterations=3)
 
-    print(voting)
+
+    # x = torch.randn(2, 10)
+    # print(x)
+    # print(torch.linalg.norm(squash(x), keepdim=True, dim=-1))
+    # print(torch.norm(squash(x), keepdim=True, dim=-1))
+
+    # print(voting)
 
 # Example voting array, shape (first num agents, second num agents):
 # Example in row 0(first agent in first) should route more of it's information to 9th agent in second
@@ -77,3 +83,13 @@ if __name__ == "__main__":
         [ 0.0196,  0.0629,  0.0386,  0.0081,  0.0470,  0.0098,  0.0138,  0.0045,
           0.0637, -0.0110]])
 """
+# first dim represent total agents each representing 0-9 digits
+# second dim represent the activation of each agent this activation is a vector we can translate this to probabilities by
+# computing the length of this vector and keeping it's direction
+last_agents = torch.randn(10, 5)
+
+agents_as_pred = torch.norm(squash(last_agents), keepdim=True, dim=-1).T # Translate to probabilities
+expected_output = torch.nn.functional.one_hot(torch.randint(0, 10, size=(1,)), num_classes=10).float()
+
+print(expected_output) # tensor([[0., 0., 0., 0., 0., 1., 0., 0., 0., 0.]])
+print(agents_as_pred) # tensor([[0.8632, 0.5487, 0.7186, 0.8359, 0.6455, 0.6512, 0.8465, 0.7687, 0.5604,0.8465]])
