@@ -123,4 +123,7 @@ def torch_runner():
 
         t.set_description(f'Loss: {train_loss:.4f} Accuracy: {accuracies:.4f}')
 
-torch_runner()
+# torch_runner()
+total_params = sum(p.numel() for p in MultiAgents().parameters())
+print(total_params)
+
