@@ -18,8 +18,7 @@ class AgentMarginLoss(nn.Module):
         self.m_minus = m_minus
         self.lambda_ = lambda_
 
-    def forward(self, agents_outputs, targets):
-        agents_probability = torch.linalg.norm(agents_outputs, dim=-1)
+    def forward(self, agents_probability, targets):
         present_loss = torch.nn.functional.relu(self.m_plus - agents_probability) ** 2
         absent_loss = torch.nn.functional.relu(agents_probability - self.m_minus) ** 2
         loss = targets * present_loss + self.lambda_ * (1 - targets) * absent_loss
@@ -68,5 +67,5 @@ class MultiAgents(nn.Module):
                 agreement = (each_agent_pred * second_agents_outputs).sum(dim=-1, keepdim=True)
                 logits_for_routing += agreement
 
-        return second_agents_outputs.squeeze(1)
+        return torch.linalg.norm(second_agents_outputs.squeeze(1), dim=-1)
 
