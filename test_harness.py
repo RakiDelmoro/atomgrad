@@ -27,13 +27,13 @@ def multi_agent_update(model, model_prediction, expected_output, learning_rate):
 
     return loss 
 
-def model_runner(model, model_update_function):
+def model_runner(model, model_update_function, model_name):
+    DEVICE = 'cuda'
     MAX_EPOCHS = 100
-    IMAGE_HEIGHT = 28
     IMAGE_WIDTH = 28
+    IMAGE_HEIGHT = 28
     BATCH_SIZE = 4096
     LEARNING_RATE = 0.001
-    DEVICE = 'cuda'
 
     with open('./dataset/mnist.pkl', 'rb') as f: ((train_images, train_labels), (test_images, test_labels), _) = pickle.load(f, encoding='latin1')
     assert train_images.shape[0] == train_labels.shape[0]
@@ -71,15 +71,17 @@ def model_runner(model, model_update_function):
 
         t.set_description(f'Loss: {train_loss:.4f} Accuracy: {accuracies:.4f}')
         
+    # torch.save(model, f'{model_name}.pth')
 
 # Multi agents architecture
-multi_agents_model = MultiAgents()
+multi_agents = MultiAgents()
 multi_agents_params_update = multi_agent_update
 
 # Standard MLP architecture
 mlp_model = StandardMLP()
 mlp_model_params_update = standard_mlp_update
 
-model_runner(multi_agents_model, multi_agents_params_update)
+
+model_runner(multi_agents, multi_agents_params_update, 'multi_agents')
 print()
-model_runner(mlp_model, mlp_model_params_update)
+model_runner(mlp_model, mlp_model_params_update, 'standard_mlp')
