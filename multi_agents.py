@@ -27,16 +27,17 @@ class AgentMarginLoss(nn.Module):
         return total_loss
 
 class Agent(nn.Module):
-    def __init__(self, out_dim_size=64):
+    def __init__(self, out_dim_size=256):
         super().__init__()
         self.linear1 = nn.Linear(784, out_dim_size, device='cuda')
-        self.linear2 = nn.Linear(out_dim_size, out_dim_size, device='cuda')
+        # self.linear2 = nn.Linear(out_dim_size, out_dim_size, device='cuda')
 
     def forward(self, x):
-        return squash(self.linear2(self.linear1(x).relu()))
+        # return squash(self.linear2(self.linear1(x).relu()))
+        return squash(self.linear1(x))
 
 class MultiAgents(nn.Module):
-    def __init__(self, num_in_agents=4, num_out_agents=10, in_agents_dim_size=64, out_agents_dim_size=16):
+    def __init__(self, num_in_agents=4, num_out_agents=10, in_agents_dim_size=256, out_agents_dim_size=32):
         super().__init__()
 
         self.num_in_agents = num_in_agents
