@@ -48,19 +48,19 @@ class Modelv2(nn.Module):
         self.box_embedding = nn.Embedding(9, 32)
 
         # Combined embedding dimension per cell
-        cell_dim = 64 + 3 * 32  # 64 + 32 + 32 + 32 = 160
-        input_size = self.n_cells * cell_dim  # 81 * 160 = 12,960
+        cell_dim = 64 + 3 * 32
+        input_size = self.n_cells * cell_dim
 
         self.network = nn.Sequential(
             # First hidden layer
             nn.Linear(input_size, 550),
-            nn.LayerNorm(550),
+            nn.BatchNorm1d(550),
             nn.ReLU(),
             nn.Dropout(0.3),
             
             # Second hidden layer
             nn.Linear(550, 1024),
-            nn.LayerNorm(1024),
+            nn.BatchNorm1d(1024),
             nn.ReLU(),
             nn.Dropout(0.4),
 
@@ -170,37 +170,57 @@ def model_runner():
 
     torch.save(model, f'./SaveModel/sudoku_solver_nn_v2.pth')
 
-def solve_sudoku_task(model, puzzle):
+def solve_sudoku_task(model, initial_board):
     # Preprocess the input Sudoku puzzle
-    puzzle = puzzle.replace('\n', '').replace(' ', '')
-    initial_board = torch.tensor([int(j) for j in puzzle], dtype=torch.float32, device='cuda').view(1, 9, 9)
+    initial_board = initial_board.replace('\n', '').replace(' ', '')
+    initial_board = torch.tensor([int(j) for j in initial_board], dtype=torch.long, device='cuda').view(9, 9)
 
     while True:
-        # Use the neural network to predict values for empty cells
-        model_output = model(initial_board).softmax(dim=-1)
+        batch_initial_board = initial_board.unsqueeze(0)
+        logits = model(batch_initial_board)
+        probabilities = torch.nn.functional.softmax(logits, dim=-1)
 
-        prediction = (model_output.argmax(-1) + 1).view(9, 9)
-        probabilities = torch.round(torch.max(model_output, dim=-1)[0], decimals=2).view(9, 9)
+        # Get predictions and confidence
+        confidences, predictions = torch.max(probabilities[0], dim=1)  # (81,)
+        predictions = predictions + 1  # Convert 0-8 to 1-9
 
-        initial_board = ((initial_board + 0.5) * 9).reshape((9, 9))
-        mask = (initial_board == 0)
+        prediction_grid = predictions.view(9, 9)
+        confidences_grid = confidences.view(9, 9)
 
-        if mask.sum() == 0:
-            # Puzzle is solved
+        # Find empty cells with high confidence predictions
+        empty_mask = (initial_board == 0)
+        high_conf_mask = (confidences_grid > 0.9) & empty_mask
+        
+        if not high_conf_mask.any():
+            initial_board[empty_mask] = prediction_grid[empty_mask]
             break
+        
+        initial_board[high_conf_mask] = prediction_grid[high_conf_mask]
 
-        prob_new = probabilities * mask
-
-        indices = torch.argmax(prob_new)
-        x, y = (indices // 9), (indices % 9)
-
-        val = prediction[x][y]
-        initial_board[x][y] = val
-
-    # Convert the solved puzzle back to a string representation
-    solved_puzzle = ''.join(map(str, initial_board.flatten().type(torch.int).tolist()))
-
-    return solved_puzzle
+        if not (initial_board == 0).any(): break
+        
+        # Final pass: fill any remaining empty cells
+        if (initial_board == 0).any():
+            puzzle_batch = initial_board.unsqueeze(0)
+            logits = model(puzzle_batch)
+            probabilities = torch.nn.functional.softmax(logits, dim=2)
+            confidences, predictions = torch.max(probabilities[0], dim=1)
+            predictions = predictions + 1
+            
+            prediction_grid = predictions.view(9, 9)
+            confidences_grid = confidences.view(9, 9)
+            
+            empty_mask = (initial_board == 0)
+            initial_board[empty_mask] = prediction_grid[empty_mask]
+        else:
+            # Get final confidence scores
+            puzzle_batch = initial_board.unsqueeze(0)
+            logits = model(puzzle_batch)
+            probabilities = torch.nn.functional.softmax(logits, dim=2)
+            confidences, _ = torch.max(probabilities[0], dim=1)
+            confidences_grid = confidences.view(9, 9)
+        
+    return ''.join(map(str, initial_board.flatten().type(torch.int).tolist())), confidences_grid
 
 def print_sudoku_grid(puzzle):
     puzzle = puzzle.replace('\n', '').replace(' ', '')
@@ -225,10 +245,13 @@ game = '''
           3 1 8 0 2 0 4 0 7
           2 4 0 0 0 5 0 0 0'''
 
-sudoku_solver = torch.load('./SaveModel/sudoku_solver_nn_v2.pth').to('cuda')
-sudoku_solver.eval()
-solve_puzzle = solve_sudoku_task(model=sudoku_solver, puzzle=game)
-print_sudoku_grid(solve_puzzle)
+def test_model():
+    sudoku_solver = torch.load('./SaveModel/sudoku_solver_nn_v2.pth').to('cuda')
+    sudoku_solver.eval()
+    solve_grid, confidence_grid = solve_sudoku_task(sudoku_solver, game)
+    print_sudoku_grid(solve_grid)
 
+
+test_model()
 # model_runner()
 # print(sum(param.numel() for param in Modelv2(grid_size=9).parameters()))
