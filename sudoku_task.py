@@ -1,34 +1,10 @@
 import torch
 import tqdm
+import pickle
 import numpy as np
 import torch.nn as nn
-
-def normalization(input_for_model):
-    return (input_for_model / 9) - 0.5
-
-def load_data_from_csv_file():
-    quizzes = np.zeros((1000000, 81), np.int32)
-    solutions = np.zeros((1000000, 81), np.int32)
-    for i, line in enumerate(open('sudoku.csv', 'r').read().splitlines()[1:]):
-        quiz, solution = line.split(",")
-        for j, q_s in enumerate(zip(quiz, solution)):
-            q, s = q_s
-            quizzes[i, j] = q
-            solutions[i, j] = s
-
-    return quizzes, solutions
-
-def sudoku_dataloader(quizzes_arr, solutions_arr, batch_size, shuffle):
-    num_train_samples = quizzes_arr.shape[0]    
-    # Total samples
-    train_indices = np.arange(num_train_samples)
-    if shuffle: np.random.shuffle(train_indices)
-
-    for start_idx in range(0, num_train_samples, batch_size):
-        end_idx = start_idx + batch_size
-
-        # Subract 1 to solution array since it output 1-9 to get 0-8
-        yield normalization(quizzes_arr[train_indices[start_idx:end_idx]]), solutions_arr[train_indices[start_idx:end_idx]]-1
+from multi_agents import MultiAgents
+from dataset.utils import sudoku_dataloader, normalization
 
 class Modelv1(nn.Module):
     def __init__(self, in_channels, grid_row, grid_column, num_classes=9):
@@ -60,54 +36,90 @@ class Modelv1(nn.Module):
         return mlp_out.view(-1, self.grid_row*self.grid_column, self.num_classes)
     
 class Modelv2(nn.Module):
-    def __init__(self, grid_row, grid_column, num_classes=9):
+    def __init__(self, grid_size):
         super().__init__()
         
-        self.grid_row = grid_row
-        self.grid_column = grid_column
-        self.num_classes = num_classes
+        self.grid_size = grid_size
+        self.n_cells = grid_size * grid_size    
 
-        self.mlp_layers = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(grid_column*grid_row, 1536),
+        self.value_embedding = nn.Embedding(10, 64)
+        self.row_embedding = nn.Embedding(9, 32)
+        self.col_embedding = nn.Embedding(9, 32)
+        self.box_embedding = nn.Embedding(9, 32)
+
+        # Combined embedding dimension per cell
+        cell_dim = 64 + 3 * 32  # 64 + 32 + 32 + 32 = 160
+        input_size = self.n_cells * cell_dim  # 81 * 160 = 12,960
+
+        self.network = nn.Sequential(
+            # First hidden layer
+            nn.Linear(input_size, 550),
+            nn.LayerNorm(550),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(1536, 1536),
+            
+            # Second hidden layer
+            nn.Linear(550, 1024),
+            nn.LayerNorm(1024),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(1536, 1536),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(1536, grid_row*grid_column*num_classes))
+            nn.Dropout(0.4),
+
+            # Output layer: 81 cells × 9 possible values
+            nn.Linear(1024, self.n_cells * grid_size))
 
     def forward(self, x):
-        mlp_out = self.mlp_layers(x)
+        # x shape: (batch, 9, 9)
+        batch_size = x.shape[0]
+        device = x.device
+        
+        # Create position indices
+        rows = torch.arange(self.grid_size, device=device).repeat(self.grid_size)
+        cols = torch.arange(self.grid_size, device=device).repeat_interleave(self.grid_size)
+        boxes = (rows // 3) * 3 + (cols // 3)
+        
+        # Expand for batch
+        rows = rows.unsqueeze(0).expand(batch_size, -1)  # (batch, 81)
+        cols = cols.unsqueeze(0).expand(batch_size, -1)
+        boxes = boxes.unsqueeze(0).expand(batch_size, -1)
+        
+        # Flatten puzzle
+        flat_x = x.view(batch_size, self.n_cells).long()  # (batch, 81)
+        
+        # Get embeddings
+        value_emb = self.value_embedding(flat_x)  # (batch, 81, 64)
+        row_emb = self.row_embedding(rows)        # (batch, 81, 32)
+        col_emb = self.col_embedding(cols)        # (batch, 81, 32)
+        box_emb = self.box_embedding(boxes)       # (batch, 81, 32)
 
-        return mlp_out.reshape(x.shape[0], self.grid_row*self.grid_column, self.num_classes)
+        # Concatenate all embeddings
+        combined = torch.cat([value_emb, row_emb, col_emb, box_emb], dim=-1)
+        # Shape: (batch, 81, 160
+
+        # Flatten for MLP
+        flat_input = combined.view(batch_size, -1)  # (batch, 10368)
+        
+        # Forward through network
+        logits = self.network(flat_input)  # (batch, 729)
+        
+        # Reshape to (batch, 81, 9) for output
+        return logits.view(batch_size, self.n_cells, self.grid_size)
 
 def model_runner():
     DEVICE = 'cuda'
-    MAX_EPOCHS = 100
+    MAX_EPOCHS = 50
     IN_CHANNELS = 1
     GRID_ROW = 9
     GRID_COLUMN = 9
-    BATCH_SIZE = 640
+    BATCH_SIZE = 1024
     LEARNING_RATE = 0.001
 
-    quizzes, solutions = load_data_from_csv_file()
+    with open('./dataset/sudoku_task.pkl', 'rb') as f:
+        ((train_quizzes, train_solutions), (test_quizzes, test_solutions), _) = pickle.load(f)
 
-    # Split into 90% training and 10% test
-    split_idx = int(len(quizzes) * 0.9)
-
-    # Split data to training and test
-    train_quizzes, train_solutions = quizzes[:split_idx], solutions[:split_idx]
-    test_quizzes, test_solutions = quizzes[split_idx:], solutions[split_idx:]
-    
     # model = Modelv1(IN_CHANNELS, GRID_ROW, GRID_COLUMN)
-    model = Modelv2(GRID_ROW, GRID_COLUMN)
-
+    model = Modelv2(grid_size=9)
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     
     model.to('cuda')
 
@@ -117,11 +129,18 @@ def model_runner():
 
         train_loss = []
         for train_batch_quizzes, train_batch_solutions in train_loader:
-            input_for_model = torch.tensor(train_batch_quizzes, device=DEVICE, dtype=torch.float32).view(-1, IN_CHANNELS*GRID_ROW*GRID_COLUMN)
+            input_for_model = torch.tensor(train_batch_quizzes, device=DEVICE, dtype=torch.long).view(-1, IN_CHANNELS*GRID_ROW*GRID_COLUMN)
             expected_model_out = torch.tensor(train_batch_solutions, device=DEVICE, dtype=torch.long)
 
             model_output = model(input_for_model)
-            model_loss = loss_fn(model_output.view(-1, 9), expected_model_out.view(-1))
+
+            # Calculate loss
+            outputs_flat = model_output.view(-1, 9)
+            expected_flat = expected_model_out.view(-1)
+
+            # Only calculate loss on empty cells
+            train_mask = (input_for_model.view(-1) == 0)
+            model_loss = loss_fn(outputs_flat[train_mask], expected_flat[train_mask] - 1)
 
             optimizer.zero_grad()
             model_loss.backward()
@@ -135,10 +154,13 @@ def model_runner():
             expected_model_out = torch.tensor(test_batch_solutions, device=DEVICE, dtype=torch.long)
 
             logits = model(input_for_model)
-            probabilities = torch.softmax(logits, dim=-1)
-            predictions = torch.argmax(probabilities, dim=-1)
 
-            avg_batch_accuracy = (predictions == expected_model_out).float().mean()
+            test_mask = (input_for_model.view(-1) == 0)
+            flattened_prediction = logits.view(-1, 9)
+            flattened_expected = expected_model_out.view(-1)
+            
+            predictions = torch.argmax(flattened_prediction[test_mask], dim=-1) + 1
+            avg_batch_accuracy = (predictions == flattened_expected[test_mask]).float().mean()
             accuracies.append(avg_batch_accuracy.item())
 
         train_loss = sum(train_loss) / len(train_loss)
@@ -146,13 +168,12 @@ def model_runner():
 
         t.set_description(f'Loss: {train_loss:.4f} Accuracy: {accuracies:.4f}')
 
-    torch.save(model, f'sudoku_solver_nn.pth')
+    torch.save(model, f'./SaveModel/sudoku_solver_nn_v2.pth')
 
 def solve_sudoku_task(model, puzzle):
     # Preprocess the input Sudoku puzzle
     puzzle = puzzle.replace('\n', '').replace(' ', '')
-    initial_board = torch.tensor([int(j) for j in puzzle], dtype=torch.float32, device='cuda').reshape((1, 1, 9, 9))
-    initial_board = normalization(initial_board)
+    initial_board = torch.tensor([int(j) for j in puzzle], dtype=torch.float32, device='cuda').view(1, 9, 9)
 
     while True:
         # Use the neural network to predict values for empty cells
@@ -175,9 +196,7 @@ def solve_sudoku_task(model, puzzle):
 
         val = prediction[x][y]
         initial_board[x][y] = val
-        initial_board = normalization(initial_board.unsqueeze(0).unsqueeze(0))
 
-    initial_board = ((initial_board + 0.5) * 9).reshape((9, 9))
     # Convert the solved puzzle back to a string representation
     solved_puzzle = ''.join(map(str, initial_board.flatten().type(torch.int).tolist()))
 
@@ -206,8 +225,10 @@ game = '''
           3 1 8 0 2 0 4 0 7
           2 4 0 0 0 5 0 0 0'''
 
-# sudo  ku_solver = torch.load('./SaveModel/sudoku_solver_nn.pth')
-# solve_puzzle = solve_sudoku_task(model=sudoku_solver, puzzle=game)
-# print_sudoku_grid(solve_puzzle)
+sudoku_solver = torch.load('./SaveModel/sudoku_solver_nn_v2.pth').to('cuda')
+sudoku_solver.eval()
+solve_puzzle = solve_sudoku_task(model=sudoku_solver, puzzle=game)
+print_sudoku_grid(solve_puzzle)
 
-model_runner()
+# model_runner()
+# print(sum(param.numel() for param in Modelv2(grid_size=9).parameters()))
